@@ -1,0 +1,17 @@
+# SCENARIO 1 — fully instrumented factory (~95-100% sensor availability)
+archetype_sensor_profile:
+  welding: full
+  fastening: full
+  alignment: full
+  pretreatment: full
+  painting: full
+  curing: full
+  torque: full
+  electrical: full
+  fluid_fill: full
+  trim: full
+  inspection: full
+  final_test: full
+
+injection:
+  sensor_dropout_prob: 0.005

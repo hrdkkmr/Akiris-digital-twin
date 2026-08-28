@@ -1,0 +1,65 @@
+{
+  "title": "TwinLine — service + twin state",
+  "uid": "twinline-ops",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "HTTP request rate by status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{
+        "expr": "sum by (status) (rate(twinline_http_requests_total[1m]))",
+        "legendFormat": "{{status}}", "refId": "A"
+      }],
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "p95 latency by route",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (route, le) (rate(twinline_http_request_duration_seconds_bucket[2m])))",
+        "legendFormat": "{{route}}", "refId": "A"
+      }],
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 3, "type": "stat", "title": "Top bottleneck score",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "targets": [{ "expr": "twinline_top_bottleneck_score", "refId": "A" }],
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "max": 1, "min": 0,
+        "thresholds": { "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 0.6 },
+          { "color": "red", "value": 0.85 } ] } } }
+    },
+    {
+      "id": 4, "type": "stat", "title": "At-risk vehicles (latest predictions)",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
+      "targets": [{ "expr": "twinline_at_risk_vehicles", "refId": "A" }],
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 5, "type": "stat", "title": "Mean analytics confidence (all stations)",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 8 },
+      "targets": [{ "expr": "twinline_mean_analytics_confidence", "refId": "A" }],
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "max": 1, "min": 0,
+        "thresholds": { "steps": [
+          { "color": "red", "value": null },
+          { "color": "orange", "value": 0.5 },
+          { "color": "green", "value": 0.75 } ] } } }
+    },
+    {
+      "id": 6, "type": "stat", "title": "Active model version / resolved predictions",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 8 },
+      "targets": [
+        { "expr": "twinline_active_model_version", "refId": "A", "legendFormat": "active v" },
+        { "expr": "twinline_predictions_resolved_total", "refId": "B", "legendFormat": "resolved" }
+      ],
+      "datasource": "Prometheus"
+    }
+  ]
+}

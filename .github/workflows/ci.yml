@@ -1,0 +1,41 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install
+        run: pip install -r backend/requirements.txt pytest
+      - name: tests
+        run: cd backend && python -m pytest tests/ -q
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pip-audit (fails on newly disclosed advisories; none known today — see docs/security_audit.md)
+        run: pip install pip-audit && pip-audit -r backend/requirements.lock --progress-spinner=off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm audit (critical only)
+        run: cd frontend && npm ci && npm audit --audit-level=critical
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: build (typecheck + bundle)
+        run: cd frontend && npm ci && npm run build

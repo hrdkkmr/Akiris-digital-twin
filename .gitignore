@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+node_modules/
+dist/
+data/runs/
+data/generated/*.db
+data/generated/*.db-*
+data/models/
+.pytest_cache/

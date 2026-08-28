@@ -1,0 +1,18 @@
+# SCENARIO 3 — brownfield / sensor-poor factory (~40-60% availability)
+# majority sparse/manual, elevated dropout on the few instrumented stations
+archetype_sensor_profile:
+  welding: mid
+  fastening: sparse
+  alignment: sparse
+  pretreatment: sparse
+  painting: mid
+  curing: sparse
+  torque: mid
+  electrical: manual
+  fluid_fill: sparse
+  trim: manual
+  inspection: sparse
+  final_test: sparse
+
+injection:
+  sensor_dropout_prob: 0.06

@@ -1,0 +1,123 @@
+# ============================================================
+# SITE CONFIG — "Aurora Motors, Line A" (automotive final product)
+# One twin core, many sites: this file is the ONLY site-specific input.
+# Engineered dynamics (for demo + ML ground truth):
+#   - S17 runs single-booth mode (capacity 1, mu 58s) -> saturated primary bottleneck
+#   - S26 torque 38s -> true 2nd bottleneck, SHADOWED behind S17 (paper: shadowing effect)
+#   - ~70% instrumented / ~19% sparse / ~10% manual-checklist (uneven coverage per PS)
+# ============================================================
+site:
+  name: "Aurora Motors — Line A"
+  industry: automotive
+  zones: [body, paint, final]
+
+demand:
+  interarrival_sec: 45.0        # takt ~45s (80 vehicles/hour planned)
+  interarrival_sigma: 2.0
+  batch_size_parts: 25          # supplier batch changes every 25 vehicles
+  product_variants:
+    - {id: SEDAN, factor: 1.00, share: 0.60}
+    - {id: SUV,   factor: 1.12, share: 0.40}
+
+shifts:
+  length_hours: 8
+  learning_window_min: 60       # new-shift operators ramp up over first hour
+
+environment:
+  temp_base_c: 26.0
+  temp_amplitude_c: 6.0         # 24h sinusoid, peaks mid-afternoon
+  humidity_base: 55.0
+  humidity_amplitude: 15.0
+
+mechanisms:
+  tool_wear:
+    enabled: true
+    wear_per_cycle: 0.0012      # wear units per cycle on tooled stations
+    risk_growth: 8.0            # defect multiplier ~ 1 + risk_growth * wear^2
+    maintenance_trigger: 0.85   # wear level forcing maintenance
+    maintenance_minutes: 12
+  supplier_batch:
+    enabled: true
+    bad_batch_prob: 0.06        # ~6% of supplier batches are degraded
+    defect_multiplier: 6.0
+  operator_shift:
+    enabled: true
+    variance_multiplier_new: 1.8
+    defect_multiplier_new: 1.6
+  paint_environment:
+    enabled: true
+    temp_threshold_c: 30.0      # risk grows above this ambient temp
+    temp_sensitivity: 0.5       # +50% risk per °C above threshold
+    humidity_threshold: 65.0
+    humidity_sensitivity: 0.03  # +3% risk per %RH above threshold
+
+injection:                      # scenario hooks (demo remote control uses these later)
+  sensor_dropout_prob: 0.02     # random missingness on every reading
+  sensor_fault_prob: 0.0        # stochastic sensor faults (raised by scenario scripts)
+
+sensor_profiles:
+  full:   [torque, vibration, temperature, motor_current]
+  mid:    [temperature]
+  sparse: []                    # cycle/part events only
+  manual: []                    # human checklist events instead
+
+archetypes:
+  welding:      {cycle_mu: 48, cycle_sigma: 4.0, capacity: 2, sensor_profile: full,   tool: spot_welder,   base_defect: 0.0005, env_sensitive: false}
+  fastening:    {cycle_mu: 30, cycle_sigma: 3.0, capacity: 1, sensor_profile: full,   tool: nutrunner,     base_defect: 0.0004, env_sensitive: false}
+  alignment:    {cycle_mu: 33, cycle_sigma: 3.0, capacity: 1, sensor_profile: mid,    tool: null,          base_defect: 0.0003, env_sensitive: false}
+  pretreatment: {cycle_mu: 44, cycle_sigma: 3.4, capacity: 2, sensor_profile: mid,    tool: null,          base_defect: 0.0003, env_sensitive: false}
+  painting:     {cycle_mu: 52, cycle_sigma: 4.5, capacity: 2, sensor_profile: full,   tool: bell_atomizer, base_defect: 0.0008, env_sensitive: true}
+  curing:       {cycle_mu: 60, cycle_sigma: 2.8, capacity: 2, sensor_profile: mid,    tool: null,          base_defect: 0.0002, env_sensitive: true}
+  torque:       {cycle_mu: 30, cycle_sigma: 2.6, capacity: 1, sensor_profile: full,   tool: dc_tool,       base_defect: 0.0008, env_sensitive: false}
+  electrical:   {cycle_mu: 33, cycle_sigma: 3.8, capacity: 1, sensor_profile: sparse, tool: null,          base_defect: 0.0006, env_sensitive: false}
+  fluid_fill:   {cycle_mu: 28, cycle_sigma: 2.4, capacity: 1, sensor_profile: mid,    tool: null,          base_defect: 0.0002, env_sensitive: false}
+  trim:         {cycle_mu: 35, cycle_sigma: 4.2, capacity: 1, sensor_profile: manual, tool: null,          base_defect: 0.0008, env_sensitive: false}
+  inspection:   {cycle_mu: 25, cycle_sigma: 2.0, capacity: 1, sensor_profile: sparse, tool: null,          base_defect: 0.0000, env_sensitive: false, is_inspection: true}
+  final_test:   {cycle_mu: 46, cycle_sigma: 3.6, capacity: 2, sensor_profile: mid,    tool: null,          base_defect: 0.0000, env_sensitive: false, is_inspection: true}
+
+stations:
+  # ---- BODY (S01–S12) ----
+  - {id: S01, zone: body,  archetype: welding}
+  - {id: S02, zone: body,  archetype: welding}
+  - {id: S03, zone: body,  archetype: welding}
+  - {id: S04, zone: body,  archetype: welding}
+  - {id: S05, zone: body,  archetype: welding}
+  - {id: S06, zone: body,  archetype: fastening}
+  - {id: S07, zone: body,  archetype: fastening}
+  - {id: S08, zone: body,  archetype: fastening}
+  - {id: S09, zone: body,  archetype: alignment}
+  - {id: S10, zone: body,  archetype: alignment}
+  - {id: S11, zone: body,  archetype: alignment}
+  - {id: S12, zone: body,  archetype: inspection}
+  # ---- PAINT (S13–S24) ----
+  - {id: S13, zone: paint, archetype: pretreatment}
+  - {id: S14, zone: paint, archetype: pretreatment}
+  - {id: S15, zone: paint, archetype: pretreatment}
+  - {id: S16, zone: paint, archetype: painting}
+  - {id: S17, zone: paint, archetype: painting, overrides: {capacity: 1, cycle_mu: 58}}   # PRIMARY BOTTLENECK (single-booth mode)
+  - {id: S18, zone: paint, archetype: painting}
+  - {id: S19, zone: paint, archetype: painting}
+  - {id: S20, zone: paint, archetype: curing}
+  - {id: S21, zone: paint, archetype: curing}
+  - {id: S22, zone: paint, archetype: curing}
+  - {id: S23, zone: paint, archetype: inspection}
+  - {id: S24, zone: paint, archetype: inspection}
+  # ---- FINAL ASSEMBLY (S25–S42) ----
+  - {id: S25, zone: final, archetype: torque}
+  - {id: S26, zone: final, archetype: torque, overrides: {cycle_mu: 38}}                 # SHADOWED 2ND BOTTLENECK
+  - {id: S27, zone: final, archetype: torque}
+  - {id: S28, zone: final, archetype: torque}
+  - {id: S29, zone: final, archetype: torque}
+  - {id: S30, zone: final, archetype: electrical}
+  - {id: S31, zone: final, archetype: electrical}
+  - {id: S32, zone: final, archetype: electrical}
+  - {id: S33, zone: final, archetype: electrical}
+  - {id: S34, zone: final, archetype: fluid_fill}
+  - {id: S35, zone: final, archetype: fluid_fill}
+  - {id: S36, zone: final, archetype: trim}
+  - {id: S37, zone: final, archetype: trim}
+  - {id: S38, zone: final, archetype: trim}
+  - {id: S39, zone: final, archetype: trim}
+  - {id: S40, zone: final, archetype: inspection}
+  - {id: S41, zone: final, archetype: inspection}
+  - {id: S42, zone: final, archetype: final_test}

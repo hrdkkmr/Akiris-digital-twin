@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: twinline
+    folder: TwinLine
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards
