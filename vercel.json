@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://akiris-digital-twin.onrender.com/:path*"
+    }
+  ]
+}
