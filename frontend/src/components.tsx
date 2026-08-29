@@ -129,3 +129,89 @@ export function ObsActionTag({ action }: { action: string }) {
   const label = action.replace(/_/g, ' ').toLowerCase()
   return <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${map[action] ?? map.DATA_QUALITY_ACTION}`}>{label}</span>
 }
+
+// ===========================================================================
+// SEMANTIC COLOR TOKENS — one source of truth for what a color means.
+// Color is NEVER the only signal: every chip pairs a dot + a text label.
+// ===========================================================================
+export const SEMANTIC = {
+  critical: { label: 'Critical', dot: 'bg-red-500', text: 'text-red-300', chip: 'bg-red-600/25 text-red-200 border-red-700/60' },
+  warning: { label: 'Needs attention', dot: 'bg-amber-400', text: 'text-amber-300', chip: 'bg-amber-600/25 text-amber-200 border-amber-700/60' },
+  elevated: { label: 'Elevated risk', dot: 'bg-orange-400', text: 'text-orange-300', chip: 'bg-orange-600/25 text-orange-200 border-orange-700/60' },
+  healthy: { label: 'Healthy', dot: 'bg-emerald-400', text: 'text-emerald-300', chip: 'bg-emerald-600/20 text-emerald-200 border-emerald-700/50' },
+  info: { label: 'Informational / Simulated', dot: 'bg-cyan-400', text: 'text-cyan-300', chip: 'bg-cyan-700/25 text-cyan-200 border-cyan-800/50' },
+  unknown: { label: 'No data', dot: 'bg-slate-500', text: 'text-slate-400', chip: 'bg-slate-700/50 text-slate-300 border-slate-700' },
+} as const
+export type SemanticKey = keyof typeof SEMANTIC
+
+/** Map an app-level status string to a semantic key (centralized). */
+export const STATUS_TO_SEMANTIC: Record<string, SemanticKey> = {
+  critical: 'critical', high: 'critical', fail: 'critical', FAIL: 'critical', DEFECT: 'critical',
+  warning: 'warning', watch: 'warning', medium: 'warning', MEDIUM: 'warning',
+  elevated: 'elevated', low: 'elevated', LOW: 'elevated',
+  ok: 'healthy', healthy: 'healthy', pass: 'healthy', PASS: 'healthy', stable: 'healthy',
+  info: 'info', simulated: 'info', pending: 'unknown', queued: 'info', approved: 'healthy',
+}
+
+/** Compact legend/key: dots + labels, visually near the visualization. */
+export function Legend({ items, className = '' }: { items: { key?: string; label: string; dot?: string }[]; className?: string }) {
+  return (
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400 ${className}`}>
+      {items.map((it, i) => {
+        const dot = it.dot ?? (it.key && SEMANTIC[STATUS_TO_SEMANTIC[it.key] ?? 'unknown']?.dot) ?? 'bg-slate-500'
+        return (
+          <span key={i} className="inline-flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${dot}`} />
+            {it.label}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Icon + text status chip — color is paired with a label for accessibility. */
+export function StatusChip({ status, label }: { status: string; label?: string }) {
+  const sem = SEMANTIC[STATUS_TO_SEMANTIC[status] ?? 'unknown']
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] font-semibold ${sem.chip}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${sem.dot}`} />
+      {label ?? status}
+    </span>
+  )
+}
+
+/** Loading / empty / error / success notice for panels (Part 21). */
+export function StateNotice({ kind, title, message }: {
+  kind: 'loading' | 'empty' | 'error' | 'success'
+  title?: string; message?: string
+}) {
+  const style = kind === 'error' ? 'border-red-800/60 bg-red-950/30 text-red-200'
+    : kind === 'success' ? 'border-emerald-800/60 bg-emerald-950/30 text-emerald-200'
+    : kind === 'loading' ? 'border-slate-700 bg-slate-900/50 text-slate-300'
+    : 'border-slate-800 bg-slate-900/40 text-slate-400'
+  const icon = kind === 'loading' ? '⏳' : kind === 'error' ? '⚠' : kind === 'success' ? '✓' : '·'
+  return (
+    <div className={`rounded border px-2.5 py-2 text-xs ${style}`}>
+      <span className="mr-1.5">{icon}</span>
+      {title && <b className="mr-1.5">{title}</b>}
+      {message ?? (kind === 'loading' ? 'Loading…' : kind === 'empty' ? 'Nothing to show yet.' : kind === 'error' ? 'Please try again.' : 'Done.')}
+    </div>
+  )
+}
+
+/** Collapsible "Technical details" layer — keeps the main screen human,
+ * keeps the numbers one click away (Part 19). */
+export function TechDetails({ label = 'Technical details', children }: { label?: string; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false)
+  return (
+    <div className="mt-1.5">
+      <button onClick={() => setOpen((v) => !v)}
+              className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-slate-500 transition hover:text-slate-300">
+        <span className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`}>▸</span>
+        {label}
+      </button>
+      {open && <div className="mt-1 rounded border border-slate-800 bg-slate-900/60 p-2 font-mono text-[10px] text-slate-400">{children}</div>}
+    </div>
+  )
+}

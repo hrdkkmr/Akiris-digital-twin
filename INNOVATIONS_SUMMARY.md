@@ -223,28 +223,85 @@ opens the CFA station) + confidence bins + model management with retrain/approve
 - **Leadership:** full panel + station links.
 - Deep link between Innovations 1, 2 and 5 (observability notes, investigate false alarms).
 
-**Live-verified (proxy):** retrain → candidate v1.1 (precision 0.099→0.667, FAR 0.901→0.333) →
-approve → model-deploy item in maintenance queue → deploy → production v1.1; demo state reset to
-production v1.0.
+**Live-verified (proxy):** revalidate → candidate v1.1 (precision 0.099→0.667,
+FAR 0.901→0.333) → approve → model-deploy item in maintenance queue → deploy
+inside the window → production v1.1; demo state reset to production v1.0.
+Deployment OUTSIDE the window is rejected by the backend
+(`"Deployment rejected — currently outside the scheduled maintenance window…"`);
+`simulate_window: true` (labeled "Simulate window execution") is required to
+bypass for prototype review.
 
 ---
 
-## Files changed / added (Innovations 4 & 5)
+## Production-polish pass — Akiris - DigitalTwin.ai UI enhancement
+A follow-up pass turned the three views into a professional industrial
+decision-support product without touching the five innovations' behavior or
+any internal identifier/route/table/module name (branding is user-facing copy
+only).
+
+- **Branding:** navbar/header/footer/title now read **"Akiris - DigitalTwin.ai"**
+  (avatar `A`); footer carries the honest disclaimer
+  *"prototype on calibrated synthetic data · advisory only · all projections are
+  estimates, never a guarantee"*. Descriptive technology references use lowercase
+  "digital twin simulation" (report disclaimers, risk notes) — the product name is
+  the brand, the technology is a digital twin.
+- **Robust API error handling** (`frontend/src/api.ts`): status-first `apiFetch`
+  with safe body reads (no blind `res.json()`). Network failure →
+  *"Unable to reach the Akiris server…"*; HTTP error without JSON detail →
+  *"The server returned an error (HTTP nnn)."*; non-JSON 200 → *"unexpected
+  response format"*; backend `detail`/`error` kept for developers, never secrets.
+  All pages render these via `errMsg(e)`; raw `fetch` was removed from
+  `ShadowSim.tsx` (uses the exported `apiPost`).
+- **Human-centered UX everywhere:** every panel now answers WHAT / WHY /
+  HOW SERIOUS / WHAT SHOULD I DO — human-readable decision first, technical
+  metrics inside expandable `TechDetails`. Bottleneck banner ("Why we're
+  flagging it" + Recommended), observability "Limited visibility at S42",
+  "Plan a Production Change" decision tool, defect trace as an investigation
+  workflow ("Where might this defect have started?"), prediction trust
+  ("How much should we trust this prediction?"), CFA labeled "correlated
+  contributing factors, not proven causes" (never "Root Cause").
+- **Maintenance-window gating enforced backend-side:** `deploy_candidate` now
+  REJECTS deployment outside the scheduled window
+  ("Deployment rejected — currently outside the scheduled maintenance window…")
+  unless the caller explicitly opts in with `simulate_window: true` (labeled
+  "Simulate window execution" with a warning in the UI). No PLC control is ever
+  implied.
+- **Loading / empty / error / success states** on every major feature via
+  `StateNotice`; color legends (`Legend`/`StatusChip`, centralized
+  `SEMANTIC`/`STATUS_TO_SEMANTIC` tokens) wherever color carries meaning —
+  never color-only.
+- **Cleanliness:** dead imports removed (project is clean under
+  `tsc --noEmit --noUnusedLocals --noUnusedParameters`), `REPORT_DISCLAIMER`
+  dead constant removed, `useMaintenanceQueue` dead import dropped.
+
+---
+
+## Files changed / added (Innovations 4 & 5 + UI enhancement)
 - **New backend:** `services/defect_traceback.py`, `services/prediction_trust.py`
-- **Modified backend:** `api/routes_analytics.py` (defects + predictions/trust routes),
-  `models/analytics.py` (ModelVersion.status, MaintenanceQueueItem.item_type + nullable scenario_id),
-  `db/session.py` (idempotent `ensure_schema` migration)
-- **New frontend:** `DefectTraceback.tsx`, `PredictionTrust.tsx`
-- **Modified frontend:** `api.ts`, `pages/{Supervisor, Manager, Leadership}.tsx`, `VehiclePanel.tsx`
+- **Modified backend:** `api/routes_analytics.py` (defects + predictions/trust
+  routes incl. `/predictions/trust/revalidate`, deploy payload
+  `{simulate_window}`), `models/analytics.py` (ModelVersion.status,
+  MaintenanceQueueItem.item_type + nullable scenario_id), `db/session.py`
+  (idempotent `ensure_schema` migration), `services/shadow_sim.py`,
+  `services/defect_traceback.py` (copy wording)
+- **New frontend:** `DefectTraceback.tsx`, `PredictionTrust.tsx`,
+  `ObsAdvisor.tsx` (rewrite), `CFAnalysis.tsx` (edits), `ShadowSim.tsx`
+  (rewrite)
+- **Modified frontend:** `api.ts` (robust fetch layer), `components.tsx`
+  (semantic tokens + `Legend`/`StatusChip`/`StateNotice`/`TechDetails`),
+  `index.html` (title), `App.tsx` (branding),
+  `pages/{Supervisor, Manager, Leadership}.tsx`,
+  `StationDrawer.tsx`, `VehiclePanel.tsx`
 
 ## Demo flow (60 s each)
 1. **Innovation 4 (Supervisor):** Defect panel → [TRACE DEFECT] on a recent defect → origin ranking,
    window, 87 exposed units, HIGH risk, containment → "Instead of manually searching production
    history, TwinLine traces back to suspected origins and forward to exposed units."
 2. **Innovation 5 (any level):** 🧠 Prediction Trust → validated 1,937, precision 9.9%, false alarms
-   90% (honest!) → station S21/S22 weak + observability notes → [Retrain] → candidate v1.1
-   precision 66.7% → [Approve] → scheduled for maintenance window → queue item appears →
-   [Complete controlled deployment] → production v1.1.
+   90% (honest!) → station S21/S22 weak + observability notes → [Revalidate Prediction System]
+   → candidate v1.1 precision 66.7% → [Approve] → scheduled for maintenance window → queue item
+   appears → [Execute deployment (maintenance window)] → production v1.1 (outside the window the
+   button explains why deployment is blocked and offers "Simulate window execution").
 
 ## Limitations (honest)
 - Traceback evidence is limited to signals that actually exist (no supplier field → supplier not

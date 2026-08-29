@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import type { DefectTrace, ExposedUnit } from './api'
+import { Legend, StateNotice } from './components'
 
 /** Innovation 4 — Defect traceback & propagation analysis UI.
  * SUSPECTED origins / POTENTIAL exposure — never "confirmed root cause". */
@@ -95,22 +96,42 @@ export function DefectTracePanel({ trace, onSelectVehicle, onSelectStation }: {
       <div className="rounded border border-red-700/60 bg-red-950/30 px-2.5 py-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs font-semibold text-red-200">
-            🛑 Defect detected at {trace.detection_station} — vehicle {trace.vehicle}
+            <span aria-hidden>🛑</span> Defect detected at {trace.detection_station} — vehicle {trace.vehicle}
             {trace.batch && <span className="ml-2 font-mono text-slate-300">batch {trace.batch}</span>}
             <span className="ml-2 font-mono text-slate-400">{fmtClock(trace.detected_at)}</span>
           </div>
-          <StrengthBadge strength={trace.defect_severity} />
+          <span className="inline-flex items-center gap-1 rounded bg-red-600/25 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-400" /> {trace.defect_severity}
+          </span>
+        </div>
+        <div className="mt-1 text-[11px] text-slate-300">
+          <b>Where might this defect have started?</b> Akiris traced this vehicle's actual production path backward
+          to find stations with supporting evidence, then forward to other units that experienced the same conditions.
         </div>
         {trace.multiple_plausible_origins && (
           <div className="mt-1 text-[10px] text-amber-300">Multiple plausible exposure points detected — the system acknowledges uncertainty.</div>
         )}
       </div>
 
+      {/* investigation workflow steps */}
+      <div className="flex flex-wrap items-center gap-1 text-[9px] uppercase tracking-widest text-slate-500">
+        {['Detected defect', 'Trace backward', 'Suspected origin', 'Supporting evidence', 'Affected units', 'Common exposure', 'Containment recommendation'].map((step, i, arr) => (
+          <React.Fragment key={step}>
+            <span className="rounded bg-slate-800/70 px-1.5 py-0.5">{step}</span>
+            {i < arr.length - 1 && <span aria-hidden>↓</span>}
+          </React.Fragment>
+        ))}
+      </div>
+
       {/* traceback path */}
       <div>
         <div className="mb-1 text-[10px] uppercase tracking-widest text-slate-500">Traceback · production path (genealogy)</div>
         <PropagationMap trace={trace} />
-        <div className="mt-1 text-[10px] text-slate-600">🔴 suspected origin · 🛑 detection · rest normal</div>
+        <Legend items={[
+          { dot: 'bg-red-400', label: 'Suspected origin' },
+          { dot: 'bg-red-500', label: 'Detection point' },
+          { dot: 'bg-slate-500', label: 'Normal station' },
+        ]} className="mt-1" />
       </div>
 
       {/* suspected origins */}
@@ -170,10 +191,21 @@ export function DefectTracePanel({ trace, onSelectVehicle, onSelectStation }: {
             ))}
           </span>
         </div>
+        <div className="mb-1 text-[10px] text-slate-400">
+          <b>Which other units could be affected?</b> "Potentially exposed" means a unit passed through the
+          suspected source during the window — it is <b>not</b> confirmed defective.
+        </div>
+        <Legend items={[
+          { dot: 'bg-red-400', label: 'High exposure' },
+          { dot: 'bg-amber-400', label: 'Medium' },
+          { dot: 'bg-slate-400', label: 'Low' },
+          { dot: 'bg-red-500', label: 'Confirmed defect' },
+        ]} className="mb-1" />
         <div className="mb-1 flex gap-3 text-[10px] text-slate-400">
           <span>potentially affected: <b className="text-amber-200">{trace.potentially_exposed_units.potentially_affected}</b></span>
           <span>confirmed defects among them: <b className="text-red-300">{trace.potentially_exposed_units.confirmed_defects}</b></span>
         </div>
+        {shown.length === 0 && <StateNotice kind="empty" message="No units match this filter." />}
         <div className="max-h-64 overflow-y-auto rounded border border-slate-800">
           <table className="w-full text-[11px] font-mono">
             <thead className="sticky top-0 bg-slate-900 text-left text-slate-500">

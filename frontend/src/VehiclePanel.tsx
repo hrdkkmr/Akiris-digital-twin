@@ -1,18 +1,18 @@
-import React, { useState } from 'react'
-import { useDefectTrace, useJourney, useVehicleCF, useVehicleDefect } from './api'
-import { Panel } from './components'
+import { useState } from 'react'
+import { errMsg, useDefectTrace, useJourney, useVehicleCF, useVehicleDefect } from './api'
+import { Legend, Panel, StateNotice } from './components'
 import { VehicleCFAnalysis } from './CFAnalysis'
 import { DefectTracePanel } from './DefectTraceback'
 
 /** Vehicle production journey (digital thread) + ranked contributing factors. */
 export function VehiclePanel({ vehicleId, onClose }: { vehicleId: number; onClose: () => void }) {
   const [truth, setTruth] = useState(false)
-  const { data, isLoading } = useJourney(vehicleId, truth)
-  const { data: cf, isLoading: cfLoading } = useVehicleCF(vehicleId)
+  const { data, isLoading, isError, error } = useJourney(vehicleId, truth)
+  const { data: cf, isLoading: cfLoading, isError: cfError, error: cfErr } = useVehicleCF(vehicleId)
   const { data: vdef } = useVehicleDefect(vehicleId)
   const [showTrace, setShowTrace] = useState(false)
   const defectId = vdef?.defects?.[0]?.id ?? null
-  const { data: trace } = useDefectTrace(showTrace ? defectId : null)
+  const { data: trace, isLoading: traceLoading, isError: traceError, error: traceErr } = useDefectTrace(showTrace ? defectId : null)
 
   return (
     <div className="fixed inset-0 z-40 flex justify-center bg-black/60 p-6" onClick={onClose}>
@@ -47,10 +47,17 @@ export function VehiclePanel({ vehicleId, onClose }: { vehicleId: number; onClos
           </div>
         </div>
 
-        {isLoading && <div className="text-slate-400">loading…</div>}
+        {isLoading && <StateNotice kind="loading" message="Rebuilding the vehicle's production journey…" />}
+        {isError && <StateNotice kind="error" title="Unable to load vehicle journey" message={errMsg(error)} />}
         {data && (
           <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
             <div>
+              <Legend items={[
+                { dot: 'bg-red-500', label: 'Inspection failure (defect surfaced here)' },
+                { dot: 'bg-amber-400', label: 'Abnormal reading (anomaly / deviation / NOK)' },
+                { dot: 'bg-slate-500', label: 'Normal station' },
+                { dot: 'bg-fuchsia-400', label: 'Simulator ground truth (judge mode)' },
+              ]} className="mb-2" />
               <div className="relative space-y-0.5">
                 {data.steps.map((s, i) => {
                   const failed = s.station === data.outcome.defect_found_at
@@ -87,6 +94,8 @@ export function VehiclePanel({ vehicleId, onClose }: { vehicleId: number; onClos
             </div>
 
             <div className="space-y-4">
+              {showTrace && traceLoading && <StateNotice kind="loading" message="Tracing the defect through production history…" />}
+              {showTrace && traceError && <StateNotice kind="error" title="Unable to complete the trace" message={errMsg(traceErr)} />}
               {showTrace && trace && (
                 <Panel title="🛑 Defect traceback & propagation (Innovation 4)"
                        right={<span className="text-[10px] uppercase tracking-widest text-slate-500">suspected origin · potential exposure</span>}>
@@ -95,7 +104,8 @@ export function VehiclePanel({ vehicleId, onClose }: { vehicleId: number; onClos
               )}
               <Panel title="🔍 Contributing-factor analysis (Innovation 2)"
                      right={cf ? <span className="text-[10px] text-slate-500">{cf.batch ? `batch ${cf.batch} · shift ${cf.shift}` : `shift ${cf.shift}`}</span> : undefined}>
-                {cfLoading && <div className="text-xs text-slate-400">correlating genealogy, batch & shift evidence…</div>}
+                {cfLoading && <StateNotice kind="loading" message="Correlating genealogy, batch & shift evidence…" />}
+                {cfError && <StateNotice kind="error" title="Analysis unavailable" message={errMsg(cfErr)} />}
                 {cf && <VehicleCFAnalysis data={cf} />}
               </Panel>
 

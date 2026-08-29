@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useStations } from './api'
 import { StationDrawer } from './StationDrawer'
 import { VehiclePanel } from './VehiclePanel'
@@ -25,10 +25,10 @@ export default function App() {
       <header className="border-b border-slate-800 bg-slate-900/70 px-5 py-3">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded bg-cyan-600 font-mono text-lg font-bold text-slate-950">T</div>
+            <div className="flex h-8 w-8 items-center justify-center rounded bg-cyan-600 font-mono text-lg font-bold text-slate-950">A</div>
             <div>
-              <div className="font-mono text-sm font-bold tracking-wide">TwinLine <span className="text-slate-500">· assembly-line digital twin</span></div>
-              <div className="text-[10px] uppercase tracking-widest text-slate-500">read-only / shadow mode · observe → analyze → predict → recommend</div>
+              <div className="font-mono text-sm font-bold tracking-wide">Akiris <span className="text-cyan-400">-</span> DigitalTwin.ai</div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500">assembly-line decision support · observe → analyze → predict → recommend</div>
             </div>
           </div>
           <nav className="flex gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1">
@@ -45,7 +45,7 @@ export default function App() {
       <main className="mx-auto w-full max-w-7xl flex-1 p-5">
         {isError && (
           <div className="mb-4 rounded border border-red-700/60 bg-red-950/40 px-4 py-2 text-sm text-red-200">
-            Cannot reach the TwinLine API ({'<BASE>'}/api). Start the backend:
+            Cannot reach the Akiris server ({'<BASE>'}/api). Start the backend:
             <code className="ml-1 rounded bg-slate-900 px-1">cd backend && uvicorn app.main:app --port 8000</code>
           </div>
         )}
@@ -55,7 +55,7 @@ export default function App() {
       </main>
 
       <footer className="border-t border-slate-800/60 px-5 py-2 text-center text-[10px] text-slate-600">
-        prototype on calibrated synthetic data · advisory only · Accenture Innovation Challenge 2026 — DigitalTwin.ai
+        <b className="text-slate-500">Akiris - DigitalTwin.ai</b> · prototype on calibrated synthetic data · advisory only · all projections are estimates, never a guarantee
       </footer>
 
       {stationId !== null && <StationDrawer stationId={stationId} onClose={() => setStationId(null)} />}

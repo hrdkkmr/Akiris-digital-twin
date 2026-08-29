@@ -271,10 +271,18 @@ def prediction_trust_view(line_id: int | None = None, db: Session = Depends(get_
     return prediction_trust.compute_prediction_trust(db, line.id)
 
 
+@router.post("/predictions/trust/revalidate")
+def prediction_revalidate_view(line_id: int | None = None, db: Session = Depends(get_db)):
+    """Revalidate the prediction system on the accumulated validated-outcome
+    corpus and create a CANDIDATE prediction policy for human review.
+    Production is never changed here."""
+    line = get_line_or_404(db, line_id)
+    return prediction_trust.retrain_candidate(db, line.id)
+
+
+# legacy alias — same revalidation workflow
 @router.post("/predictions/trust/retrain")
 def prediction_retrain_view(line_id: int | None = None, db: Session = Depends(get_db)):
-    """Create a CANDIDATE model by revalidating on the validated-outcome corpus.
-    Production is never changed here."""
     line = get_line_or_404(db, line_id)
     return prediction_trust.retrain_candidate(db, line.id)
 
@@ -289,11 +297,15 @@ def prediction_approve_view(payload: dict, line_id: int | None = None,
 
 
 @router.post("/predictions/trust/deploy")
-def prediction_deploy_view(line_id: int | None = None, db: Session = Depends(get_db)):
-    """Simulate maintenance-window execution: promote the approved candidate
-    to production (controlled deployment)."""
+def prediction_deploy_view(payload: dict | None = None, line_id: int | None = None,
+                           db: Session = Depends(get_db)):
+    """Controlled deployment, backend-gated to the maintenance window.
+    payload.simulate_window=true explicitly simulates window execution
+    (prototype — never touches a real PLC)."""
     line = get_line_or_404(db, line_id)
-    return prediction_trust.deploy_candidate(db, line.id)
+    payload = payload or {}
+    return prediction_trust.deploy_candidate(db, line.id,
+                                             simulate_window=bool(payload.get("simulate_window", False)))
 
 
 @router.get("/recommendations")

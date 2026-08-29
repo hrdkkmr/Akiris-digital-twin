@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { Bar, BarChart, Cell, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts'
-import { useBottlenecks, useDefectTrace, useDefects, useDQ, useMaintenanceQueue, useModelPerf, useObservabilityAdvisor, usePatterns, useShadowWindows, useStationFactors, useSummary, useTrends } from '../api'
-import { KpiCard, Panel, simClock } from '../components'
+import { Bar, BarChart, Cell, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend as RechartsLegend } from 'recharts'
+import { errMsg, useBottlenecks, useDefectTrace, useDefects, useDQ, useMaintenanceQueue, useModelPerf, useObservabilityAdvisor, usePatterns, useShadowWindows, useStationFactors, useSummary, useTrends } from '../api'
+import { KpiCard, Legend, Panel, simClock, StateNotice } from '../components'
 import { ObsAdvisorSummary } from '../ObsAdvisor'
 import { FactorBar, PatternCard } from '../CFAnalysis'
 import { MaintenanceQueuePanel, ShadowSimLab, SimHistory } from '../ShadowSim'
@@ -18,13 +18,13 @@ export default function Manager() {
   const { data: perf } = useModelPerf()
   const { data: trends } = useTrends(50)
   const { data: obs } = useObservabilityAdvisor()
-  const { data: patterns } = usePatterns()
+  const { data: patterns, isLoading: patternsLoading, isError: patternsError, error: patternsErr } = usePatterns()
   const { data: win } = useShadowWindows()
   const queueItems = useQueueItems()
-  const { data: topCF, isLoading: topCFLoading } = useStationFactors(bn?.top?.station_id ?? null)
+  const { data: topCF, isLoading: topCFLoading, isError: topCFError, error: topCFErr } = useStationFactors(bn?.top?.station_id ?? null)
   const { data: defects } = useDefects(8)
   const [traceId, setTraceId] = useState<number | null>(null)
-  const { data: trace } = useDefectTrace(traceId)
+  const { data: trace, isLoading: traceLoading, isError: traceError, error: traceErr } = useDefectTrace(traceId)
 
   const bnChart = (bn?.ranking ?? []).slice(0, 10).map((r) => ({ code: r.code, score: r.score, status: r.status }))
   const zoneData = Object.entries(sum?.defects_by_zone_found ?? {}).map(([zone, n]) => ({ zone, defects: n }))
@@ -41,7 +41,8 @@ export default function Manager() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="Bottleneck ranking (evidence composite)">
+        <Panel title="Bottleneck ranking (evidence composite)"
+               right={<Legend items={[{ dot: 'bg-red-400', label: 'Critical' }, { dot: 'bg-amber-400', label: 'High' }, { dot: 'bg-cyan-400', label: 'Watch / OK' }]} />}>
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-wide text-slate-500">window:</span>
             {([['full', undefined], ['last 1h', 3600], ['last 2h', 7200]] as [string, number | undefined][]).map(([label, w]) => (
@@ -72,7 +73,8 @@ export default function Manager() {
           <div className="mt-1 text-[10px] text-slate-500">{bn?.method_note}</div>
         </Panel>
 
-        <Panel title="Defects by zone found (delayed-surfacing view)">
+        <Panel title="Defects by zone found (delayed-surfacing view)"
+               right={<Legend items={[{ dot: 'bg-violet-400', label: 'Defects discovered (not origins)' }]} />}>
           <div className="h-64">
             <ResponsiveContainer>
               <BarChart data={zoneData} margin={{ left: 8, right: 16 }}>
@@ -89,7 +91,11 @@ export default function Manager() {
 
       <Panel title="Intermittent patterns — conditions under which incidents occur disproportionately (Innovation 2)"
              right={<span className="text-[10px] uppercase tracking-wide text-slate-500">correlation, not causation</span>}>
-        {(patterns?.patterns.length ?? 0) === 0 && <div className="text-xs text-slate-500">No statistically meaningful patterns in the current dataset (min-sample guard applied).</div>}
+        {patternsLoading && <StateNotice kind="loading" message="Scanning for conditions under which incidents cluster…" />}
+        {patternsError && <StateNotice kind="error" title="Unable to compute patterns" message={errMsg(patternsErr)} />}
+        {(patterns?.patterns.length ?? 0) === 0 && !patternsLoading && !patternsError && (
+          <StateNotice kind="empty" message="No statistically meaningful patterns in the current dataset (min-sample guard applied)." />
+        )}
         <div className="grid gap-2 md:grid-cols-2">
           {(patterns?.patterns ?? []).map((p, i) => <PatternCard key={i} pattern={p} />)}
         </div>
@@ -98,17 +104,20 @@ export default function Manager() {
       {topCF && (
         <Panel title={`Contributing factors at the current constraint ${topCF.station}`}
                right={<span className="text-[10px] uppercase tracking-wide text-slate-500">relative evidence · {topCF.bottleneck?.status}</span>}>
-          {topCFLoading ? <div className="text-xs text-slate-400">analyzing…</div> : (
-            <div className="grid gap-1.5 md:grid-cols-2">
-              {topCF.factors.map((f) => <FactorBar key={f.factor} factor={f} />)}
-            </div>
+          {topCFLoading ? <StateNotice kind="loading" message="Correlating equipment, process, batch & shift evidence…" /> : (
+            topCFError ? <StateNotice kind="error" title="Analysis unavailable" message={errMsg(topCFErr)} /> : (
+              <div className="grid gap-1.5 md:grid-cols-2">
+                {topCF.factors.map((f) => <FactorBar key={f.factor} factor={f} />)}
+              </div>
+            )
           )}
           {topCF.analysis_note && <div className="mt-2 text-[10px] text-amber-300/80">⚠ {topCF.analysis_note}</div>}
           <div className="mt-2 text-[10px] italic text-slate-500">{topCF.disclaimer}</div>
         </Panel>
       )}
 
-      <Panel title="Production trend — FPY % and throughput per 50-vehicle bucket (from twin history)">
+      <Panel title="Production trend — FPY % and throughput per 50-vehicle bucket (from twin history)"
+             right={<Legend items={[{ dot: 'bg-cyan-400', label: 'Throughput (veh/h)' }, { dot: 'bg-violet-400', label: 'First-pass yield %' }]} />}>
         <div className="h-56">
           <ResponsiveContainer>
             <LineChart data={(trends?.buckets ?? []).map((b) => ({ ...b, fpy_pct: +(b.fpy * 100).toFixed(1) }))} margin={{ left: 4, right: 12, top: 4 }}>
@@ -118,7 +127,7 @@ export default function Manager() {
               <YAxis yAxisId="fpy" orientation="right" domain={[80, 100]} tick={{ fill: '#94a3b8', fontSize: 11 }} />
               <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
                        labelFormatter={(l) => `bucket ${l} (${trends?.bucket_size} veh)`} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <RechartsLegend wrapperStyle={{ fontSize: 11 }} />
               <Line yAxisId="tput" type="monotone" dataKey="throughput_per_hour" name="veh/h" stroke="#22d3ee" strokeWidth={2} dot={false} />
               <Line yAxisId="fpy" type="monotone" dataKey="fpy_pct" name="FPY %" stroke="#a78bfa" strokeWidth={2} dot={false} />
             </LineChart>
@@ -129,6 +138,9 @@ export default function Manager() {
 
       <Panel title="🛑 Defect traceback & propagation (Innovation 4)"
              right={<span className="text-[10px] uppercase tracking-widest text-slate-500">suspected origins · potential exposure</span>}>
+        {(defects?.defects.length ?? 0) === 0 && (
+          <StateNotice kind="empty" message="No defects detected in the current window to trace." />
+        )}
         <div className="grid gap-1.5 md:grid-cols-2">
           {(defects?.defects ?? []).map((d) => (
             <div key={d.id} className="flex items-center justify-between gap-2 rounded border border-slate-800 bg-slate-900/50 px-2 py-1.5 text-xs">
@@ -144,6 +156,8 @@ export default function Manager() {
             </div>
           ))}
         </div>
+        {traceLoading && <StateNotice kind="loading" message="Tracing the defect through production history…" />}
+        {traceError && <StateNotice kind="error" title="Unable to complete the trace" message={errMsg(traceErr)} />}
         {trace && (
           <div className="mt-2 rounded border border-slate-700/70 bg-slate-900/60 p-2.5">
             <div className="mb-1.5 flex items-center justify-between">
@@ -194,6 +208,13 @@ export default function Manager() {
 
         <Panel title="Station observability (coverage → analytics confidence)"
                right={<ObsAdvisorSummary data={obs} />}>
+          <Legend items={[
+            { dot: 'bg-amber-400', label: 'Coverage < 50%' },
+            { dot: 'bg-red-400', label: 'Stale data' },
+            { dot: 'bg-red-400', label: 'Confidence < 50%' },
+            { dot: 'bg-amber-400', label: 'Confidence 50–70%' },
+            { dot: 'bg-emerald-400', label: 'Confidence ≥ 70%' },
+          ]} className="mb-2" />
           <div className="max-h-64 overflow-y-auto pr-1">
             <table className="w-full text-xs font-mono">
               <thead className="sticky top-0 bg-slate-900 text-left text-slate-500">

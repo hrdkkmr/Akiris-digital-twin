@@ -44,11 +44,15 @@ export function PatternCard({ pattern }: { pattern: CFPattern }) {
     <div className="rounded border border-amber-700/50 bg-amber-950/20 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-200">
-          <span>⚠</span> {pattern.title}
+          <span aria-hidden>⚠</span> {pattern.title}
         </span>
         <StrengthTag strength={pattern.strength} />
       </div>
       <div className="mt-1 text-[11px] text-slate-300">{pattern.description}</div>
+      <div className="mt-1.5 border-t border-amber-800/40 pt-1.5 text-[10px] text-amber-200/80">
+        <b>Why this matters:</b> the issue does not occur continuously, which makes it easy
+        to miss with simple threshold monitoring.
+      </div>
       <div className="mt-1 font-mono text-[10px] text-slate-500">
         {Object.entries(pattern.statistics).map(([k, v]) => (
           <span key={k} className="mr-2">{k}: {v}</span>
@@ -139,8 +143,9 @@ export function StationCFAnalysis({ data }: { data?: CFResp }) {
         </div>
       )}
       <div>
-        <div className="mb-1.5 text-[10px] uppercase tracking-widest text-slate-500">Likely contributing factors · relative evidence</div>
-        {data.factors.length === 0 && <div className="text-xs text-slate-400">no strong evidence — incident may be stochastic</div>}
+        <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">What may be contributing to this defect?</div>
+        <div className="mb-1.5 text-[10px] italic text-slate-500">These are correlated contributing factors, not proven causes.</div>
+        {data.factors.length === 0 && <div className="text-xs text-slate-400">No strong evidence — this incident may be stochastic (insufficient data).</div>}
         <div className="space-y-1.5">{data.factors.map((f) => <FactorBar key={f.factor} factor={f} />)}</div>
       </div>
       {data.intermittent_patterns.length > 0 && (

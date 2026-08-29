@@ -38,12 +38,9 @@ def _num(v) -> float | None:
         return None
 
 
-SIM_NOTE = ("Projected / simulated outcome — a Digital-Twin estimate, not a "
+SIM_NOTE = ("Projected / simulated outcome — a digital twin estimate, not a "
             "real production result. Validate against real conditions before "
             "implementation.")
-REPORT_DISCLAIMER = ("Results are Digital Twin simulation projections and "
-                     "should be validated against real production conditions "
-                     "before implementation.")
 
 
 # ---------------------------------------------------------------------------
@@ -244,14 +241,8 @@ def _shadow_metrics(base: dict, changes: list[dict],
     m["avg_cycle_time_s"] = round(max(20.0, base["avg_cycle_time_s"]
                                       - cycle_delta / max(n_changed, 1)), 1)
     m["total_queue"] = max(0, base["total_queue"] + queue_delta)
-    m["avg_utilization_pct"] = round(
-    max(
-        0.0,
-        base["avg_utilization_pct"]
-        + sum(util_delta.values()) / max(len(util_delta), 1) * 100
-    ),
-    1
-    )
+    m["avg_utilization_pct"] = round(max(0.0, base["avg_utilization_pct"]
+                                         + sum(util_delta.values()) / max(len(util_delta), 1) * 100), 1)
     m["mean_analytics_confidence_pct"] = round(min(100.0, base["mean_analytics_confidence_pct"]
                                                    + confidence_delta * 100), 1)
     return m, warnings
@@ -294,7 +285,7 @@ def _risk_assessment(base: dict, shadow: dict, changes: list[dict],
                       "(shadow runs them as a combined configuration, not additive)")
     level = "high" if score >= 4 else "medium" if score >= 2 else "low"
     return {"level": level, "score": score, "details": detail,
-            "note": "Digital Twin simulation risk assessment — not a certified industrial safety assessment."}
+            "note": "Digital twin simulation risk assessment — not a certified industrial safety assessment."}
 
 
 # ---------------------------------------------------------------------------

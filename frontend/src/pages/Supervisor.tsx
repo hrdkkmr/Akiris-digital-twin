@@ -1,10 +1,11 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useAnomalies, useBottlenecks, useDefectRisks, useInjectionKinds, useInject, useMlRefresh, useObservabilityAdvisor, useRecommendations, useStations } from '../api'
-import { ConfidenceTag, KpiCard, Panel, StationTile, ZoneLabel, simClock } from '../components'
+import { ConfidenceTag, KpiCard, Legend, Panel, StationTile, StateNotice, TechDetails, ZoneLabel, simClock } from '../components'
 import { MaintenanceCountdown, ShadowSimLab } from '../ShadowSim'
 import { DefectTracePanel } from '../DefectTraceback'
 import { PredictionTrustPanel } from '../PredictionTrust'
 import { useDefectTrace, useDefects, useShadowWindows } from '../api'
+import { errMsg } from '../api'
 
 /** SCENARIO INJECTION — continue the live twin with a disruption (demo/drill layer). */
 function InjectionPanel() {
@@ -51,12 +52,12 @@ function InjectionPanel() {
 
       {inject.isError && (
         <div className="mt-2 rounded border border-red-700/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
-          injection failed: {String((inject.error as Error)?.message)}
+          injection failed: {errMsg(inject.error)}
         </div>
       )}
       {mlRefresh.isError && (
         <div className="mt-2 rounded border border-red-700/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
-          refresh failed: {String((mlRefresh.error as Error)?.message)}
+          refresh failed: {errMsg(mlRefresh.error)}
         </div>
       )}
       {rep && (
@@ -99,7 +100,7 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
   const { data: defects } = useDefects(10)
   const [traceId, setTraceId] = useState<number | null>(null)
   const [showTrust, setShowTrust] = useState(false)
-  const { data: trace } = useDefectTrace(traceId)
+  const { data: trace, isLoading: traceLoading, isError: traceError, error: traceErr } = useDefectTrace(traceId)
   const codeToId = Object.fromEntries((board?.stations ?? []).map((s) => [s.code, s.id]))
 
   const zones = ['body', 'paint', 'final']
@@ -123,26 +124,42 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
 
   return (
     <div className="space-y-4">
-      {/* bottleneck banner — the one thing a supervisor must see instantly */}
+      {/* bottleneck banner — human-readable decision first, details one click away */}
       {bn?.top && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-700/60 bg-red-950/40 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <span className="text-lg">⚠</span>
-            <div>
-              <div className="font-mono text-sm font-bold text-red-200">
-                CURRENT BOTTLENECK: {bn.top.code}
-                <span className="ml-3 font-normal text-red-300/80">score {bn.top.score} · queue {bn.top.evidence.max_queue} · util {(bn.top.evidence.avg_utilization * 100).toFixed(0)}%</span>
+        <div className="rounded-lg border border-red-700/60 bg-red-950/40 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xl" aria-hidden>⚠</span>
+              <div>
+                <div className="text-sm font-bold text-red-100">
+                  Bottleneck detected — station {bn.top.code} is currently limiting line throughput
+                </div>
+                <div className="mt-0.5 text-xs text-red-300/80">
+                  {(bn.top.evidence.avg_utilization * 100).toFixed(0)}% utilization · {bn.top.evidence.max_queue.toLocaleString()} units waiting
+                </div>
               </div>
-              <div className="text-xs text-red-300/70">{bn.method_note}</div>
+            </div>
+            <div className="flex items-center gap-3">
+              <ConfidenceTag confidence={bn.top.confidence} />
+              <button onClick={() => onSelectStation(bn.top!.station_id)}
+                      className="rounded-md bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cyan-600"
+                      title="Open contributing-factor analysis for the bottleneck station">
+              🔍 Investigate
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <ConfidenceTag confidence={bn.top.confidence} />
-            <button onClick={() => onSelectStation(bn.top!.station_id)}
-                    className="rounded-md border border-cyan-700/60 bg-cyan-950/40 px-3 py-1.5 text-xs text-cyan-200 transition hover:bg-cyan-900/50"
-                    title="Open contributing-factor analysis for the bottleneck station">
-              🔍 Investigate
-            </button>
+          <div className="mt-2 border-t border-red-900/50 pt-2">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-red-300/80">Why we're flagging it</div>
+            <ul className="mt-1 grid gap-x-6 gap-y-0.5 text-[11px] text-red-200/90 sm:grid-cols-2">
+              {bn.top.evidence.avg_utilization >= 0.9 && <li className="flex gap-1.5"><span className="text-red-400">•</span>Station is running at {(bn.top.evidence.avg_utilization * 100).toFixed(0)}% capacity</li>}
+              {bn.top.evidence.max_queue > 100 && <li className="flex gap-1.5"><span className="text-red-400">•</span>{bn.top.evidence.max_queue.toLocaleString()} units are waiting in front of it</li>}
+              {bn.top.evidence.avg_abs_cycle_dev_s > 4 && <li className="flex gap-1.5"><span className="text-red-400">•</span>Cycle time is running {(bn.top.evidence.avg_abs_cycle_dev_s).toFixed(1)}s off its normal range</li>}
+              {bn.top.evidence.downtime_s > 300 && <li className="flex gap-1.5"><span className="text-red-400">•</span>{Math.round(bn.top.evidence.downtime_s / 60)} min of maintenance downtime in the window</li>}
+              <li className="flex gap-1.5"><span className="text-red-400">•</span>Recommended: inspect {bn.top.code} tooling during the next maintenance window</li>
+            </ul>
+            <TechDetails label="Technical details">
+              bottleneck score {bn.top.score} · evidence window {bn.top.evidence.samples} samples · avg cycle deviation {bn.top.evidence.avg_abs_cycle_dev_s}s · downtime {Math.round(bn.top.evidence.downtime_s)}s · method: {bn.method}
+            </TechDetails>
           </div>
         </div>
       )}
@@ -194,8 +211,9 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
               <span className="text-[10px] uppercase tracking-widest text-slate-500">Defect investigation</span>
               <button onClick={() => setTraceId(null)} className="text-[10px] text-slate-500 hover:text-slate-300">✕ close</button>
             </div>
+            {traceLoading && <StateNotice kind="loading" message="Tracing the defect through production history…" />}
+            {traceError && <StateNotice kind="error" title="Unable to complete the trace" message={errMsg(traceErr)} />}
             {trace && <DefectTracePanel trace={trace} onSelectVehicle={onSelectVehicle} onSelectStation={onSelectStation} />}
-            {!trace && <div className="text-xs text-slate-400">tracing…</div>}
           </div>
         )}
       </Panel>
@@ -226,7 +244,8 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
       </Panel>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <Panel title="Line board — click a station for detail">
+        <Panel title="Line board — click a station for detail"
+               right={<Legend items={[{ key: 'critical', label: 'Critical' }, { key: 'warning', label: 'Needs attention' }, { key: 'ok', label: 'Healthy' }]} />}>
           {zones.map((z) => (
             <div key={z}>
               <ZoneLabel>{z} zone</ZoneLabel>
@@ -240,18 +259,21 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
         </Panel>
 
         <div className="space-y-4">
-          <Panel title="Active alerts & advisories">
+          <Panel title="Active alerts & advisories"
+                 right={<Legend items={[{ key: 'critical', label: 'High' }, { key: 'warning', label: 'Medium' }, { key: 'ok', label: 'Info' }]} />}>
             <ul className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
               {alerts.map((a, i) => (
-                <li key={i} className={`rounded border-l-2 px-2 py-1.5 text-xs ${a.sev === 'high' ? 'border-red-500 bg-red-950/30' : a.sev === 'medium' ? 'border-amber-500 bg-amber-950/20' : 'border-slate-600 bg-slate-900/40'}`}>
-                  {a.text}
+                <li key={i} className={`flex items-start gap-1.5 rounded border-l-2 px-2 py-1.5 text-xs ${a.sev === 'high' ? 'border-red-500 bg-red-950/30 text-red-200' : a.sev === 'medium' ? 'border-amber-500 bg-amber-950/20 text-amber-200' : 'border-slate-600 bg-slate-900/40 text-slate-300'}`}>
+                  <span className="mt-0.5 shrink-0">{a.sev === 'high' ? '🔴' : a.sev === 'medium' ? '🟠' : '🔵'}</span>
+                  <span>{a.text}</span>
                 </li>
               ))}
-              {alerts.length === 0 && <li className="text-xs text-slate-500">line stable — no active alerts</li>}
+              {alerts.length === 0 && <li className="text-xs text-slate-500">Line stable — no active alerts.</li>}
             </ul>
           </Panel>
 
-          <Panel title="Vehicles at elevated defect risk">
+          <Panel title="Vehicles at elevated defect risk"
+                 right={<Legend items={[{ dot: 'bg-red-500', label: 'High risk' }, { dot: 'bg-amber-400', label: 'Elevated' }]} />}>
             <ul className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
               {risks?.vehicles.map((v) => (
                 <li key={v.id}>

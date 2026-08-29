@@ -58,11 +58,6 @@ def classify(probability: float, actual: bool | None, thr: float) -> str:
     return "FN"
 
 
-def _station_at_seq(db: Session, line_id: int, seq: int) -> Station | None:
-    return (db.query(Station)
-            .filter(Station.line_id == line_id, Station.seq == seq).first())
-
-
 def _metrics(rows: list[tuple[float, bool | None, float]]) -> dict | None:
     """rows = (probability, actual, threshold). Returns calculated metrics."""
     validated = [r for r in rows if r[1] is not None]
@@ -337,14 +332,28 @@ def approve_candidate(db: Session, line_id: int, approve: bool) -> dict:
                     "until the maintenance window executes."}
 
 
-def deploy_candidate(db: Session, line_id: int) -> dict:
-    """Simulate the maintenance-window execution: promote the approved
-    candidate to production and retire the previous production model."""
+def deploy_candidate(db: Session, line_id: int, simulate_window: bool = False) -> dict:
+    """Controlled deployment — backend-enforced maintenance-window gating.
+
+    Deployment is ONLY allowed during a scheduled maintenance window.
+    Outside the window the request is rejected with a clear message;
+    the prototype may explicitly *simulate* window execution
+    (simulate_window=True, clearly labeled) so the workflow can be
+    demonstrated without pretending to control a real PLC."""
     cand = (db.query(ModelVersion).filter(ModelVersion.name == "defect_risk",
                                           ModelVersion.status == "approved")
             .order_by(ModelVersion.id.desc()).first())
     if not cand:
         return {"error": "no approved candidate awaiting deployment"}
+    win = maintenance_windows(db, line_id)
+    now = win["now"]
+    in_window = win["next_window_start"] <= now <= win["next_window_end"]
+    if not in_window and not simulate_window:
+        return {"error": ("Deployment rejected — currently outside the scheduled "
+                          "maintenance window. Deployment is only permitted during "
+                          f"a maintenance window (next: {win['window_label']}, "
+                          f"in {win['countdown_s']/3600:.1f}h)."),
+                "status": "blocked"}
     prod = (db.query(ModelVersion).filter(ModelVersion.name == "defect_risk",
                                           ModelVersion.status == "production").all())
     for m in prod:
@@ -356,5 +365,7 @@ def deploy_candidate(db: Session, line_id: int) -> dict:
      .update({"status": "complete"}))
     db.commit()
     return {"deployed": cand.version,
-            "note": "Controlled deployment executed via the maintenance window — "
-                    "candidate is now the production model."}
+            "simulated": simulate_window,
+            "note": ("Controlled deployment executed via the maintenance window — "
+                     "candidate is now the production model." +
+                     (" (window execution simulated in the prototype)" if simulate_window else ""))}

@@ -1,13 +1,13 @@
-import React from 'react'
-import { useObservabilityAdvisor, useStationDetail, useStationFactors } from './api'
-import { ConfidenceTag, Meter, ObsActionTag, ObsLevelTag, Panel, PriorityTag, simClock } from './components'
+
+import { errMsg, useObservabilityAdvisor, useStationDetail, useStationFactors } from './api'
+import { ConfidenceTag, Legend, Meter, ObsActionTag, ObsLevelTag, Panel, PriorityTag, simClock, StateNotice, TechDetails } from './components'
 import { StationCFAnalysis } from './CFAnalysis'
 
 export function StationDrawer({ stationId, onClose }: { stationId: number; onClose: () => void }) {
-  const { data, isLoading } = useStationDetail(stationId)
+  const { data, isLoading, isError, error } = useStationDetail(stationId)
   const { data: obs } = useObservabilityAdvisor()
   const advisor = obs?.stations.find((s) => s.station_id === stationId)
-  const { data: cf, isLoading: cfLoading, isError: cfError } = useStationFactors(stationId)
+  const { data: cf, isLoading: cfLoading, isError: cfError, error: cfErr } = useStationFactors(stationId)
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/50" onClick={onClose}>
       <div className="h-full w-full max-w-xl overflow-y-auto border-l border-slate-700 bg-slate-950 p-5"
@@ -19,7 +19,8 @@ export function StationDrawer({ stationId, onClose }: { stationId: number; onClo
           </h2>
           <button onClick={onClose} className="rounded border border-slate-700 px-2 py-1 text-sm hover:bg-slate-800">✕</button>
         </div>
-        {isLoading && <div className="text-slate-400">loading…</div>}
+        {isLoading && <StateNotice kind="loading" message="Loading station state…" />}
+        {isError && <StateNotice kind="error" title="Unable to load station" message={errMsg(error)} />}
         {data && (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-3">
@@ -35,16 +36,17 @@ export function StationDrawer({ stationId, onClose }: { stationId: number; onClo
             </div>
 
             {data.bottleneck && (
-              <Panel title="Bottleneck evidence"
+              <Panel title={data.bottleneck.status === 'critical' ? '⚠ This station is a critical bottleneck' : 'Bottleneck evidence'}
                      right={<ConfidenceTag confidence={data.bottleneck.confidence} />}>
-                <div className="grid grid-cols-2 gap-2 font-mono text-xs">
-                  <div>score <span className="text-cyan-300">{data.bottleneck.score}</span></div>
-                  <div>status <span className="text-cyan-300">{data.bottleneck.status}</span></div>
-                  <div>avg util {(data.bottleneck.evidence.avg_utilization * 100).toFixed(1)}%</div>
-                  <div>max queue {data.bottleneck.evidence.max_queue}</div>
-                  <div>avg |cycle dev| {data.bottleneck.evidence.avg_abs_cycle_dev_s}s</div>
-                  <div>downtime {data.bottleneck.evidence.downtime_s}s</div>
+                <div className="text-[11px] text-slate-300">
+                  This station is limiting line throughput: {(data.bottleneck.evidence.avg_utilization * 100).toFixed(0)}%
+                  utilization and {data.bottleneck.evidence.max_queue.toLocaleString()} units waiting.
                 </div>
+                <TechDetails label="Technical details">
+                  bottleneck score {data.bottleneck.score} · status {data.bottleneck.status} ·
+                  avg util {(data.bottleneck.evidence.avg_utilization * 100).toFixed(1)}% · max queue {data.bottleneck.evidence.max_queue} ·
+                  avg |cycle dev| {data.bottleneck.evidence.avg_abs_cycle_dev_s}s · downtime {data.bottleneck.evidence.downtime_s}s
+                </TechDetails>
               </Panel>
             )}
 
@@ -126,26 +128,35 @@ export function StationDrawer({ stationId, onClose }: { stationId: number; onClo
 
             <Panel title="🔍 Contributing-factor analysis (Innovation 2)"
                    right={<span className="animate-pulse text-[10px] text-slate-500">{cfLoading ? 'analyzing…' : cf?.factors.length ? `${cf.factors.length} factors` : ''}</span>}>
-              {cfLoading && <div className="text-xs text-slate-400">correlating equipment, process, batch, shift & environment evidence…</div>}
-              {cfError && <div className="text-xs text-red-300">analysis unavailable — {String((cfError as unknown as Error)?.message ?? cfError)}</div>}
+              {cfLoading && <StateNotice kind="loading" message="Correlating equipment, process, batch, shift & environment evidence…" />}
+              {cfError && <StateNotice kind="error" title="Analysis unavailable" message={errMsg(cfErr)} />}
               {cf && <StationCFAnalysis data={cf} />}
             </Panel>
 
             <Panel title="Recent vehicles through this station">
-              <table className="w-full text-xs font-mono">
-                <thead><tr className="text-left text-slate-500"><th>VIN</th><th>cycle</th><th>dev</th><th>anom</th><th>chk</th></tr></thead>
-                <tbody>
-                  {data.recent_events.map((e, i) => (
-                    <tr key={i} className="border-t border-slate-800">
-                      <td className="py-1 text-cyan-300">{e.vin}</td>
-                      <td>{e.cycle_time ?? '—'}</td>
-                      <td className={(e.cycle_dev ?? 0) > 4 ? 'text-amber-300' : ''}>{e.cycle_dev ?? '—'}</td>
-                      <td>{e.anomaly_score?.toFixed(2) ?? '—'}</td>
-                      <td className={e.checklist === 'NOK' ? 'text-red-400' : ''}>{e.checklist ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {data.recent_events.length === 0 && (
+                <StateNotice kind="empty" message="No vehicles recorded at this station in the current window." />
+              )}
+              {data.recent_events.length > 0 && (
+                <table className="w-full text-xs font-mono">
+                  <thead><tr className="text-left text-slate-500"><th>VIN</th><th>cycle</th><th>dev</th><th>anom</th><th>chk</th></tr></thead>
+                  <tbody>
+                    {data.recent_events.map((e, i) => (
+                      <tr key={i} className="border-t border-slate-800">
+                        <td className="py-1 text-cyan-300">{e.vin}</td>
+                        <td>{e.cycle_time ?? '—'}</td>
+                        <td className={(e.cycle_dev ?? 0) > 4 ? 'text-amber-300' : ''}>{e.cycle_dev ?? '—'}</td>
+                        <td>{e.anomaly_score?.toFixed(2) ?? '—'}</td>
+                        <td className={e.checklist === 'NOK' ? 'text-red-400' : ''}>{e.checklist ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <Legend items={[
+                { dot: 'bg-amber-400', label: 'Cycle deviation > 4s' },
+                { dot: 'bg-red-400', label: 'Checklist NOK (failed inspection)' },
+              ]} className="mt-1" />
             </Panel>
             <div className="text-right text-[10px] text-slate-600">baseline cycle μ={data.baseline.cycle_mu}s σ={data.baseline.cycle_sigma}s · {simClock(data.current.utilization)}</div>
           </div>

@@ -30,7 +30,7 @@ TRACE_CAVEAT = ("Suspected origins and potential exposures are observed "
                 "associations from available data — not a confirmed root "
                 "cause. A unit being potentially exposed does NOT mean it "
                 "is defective.")
-RISK_NOTE = "Digital Twin propagation-risk estimate (not a certified safety/quality score)."
+RISK_NOTE = "Digital twin propagation-risk estimate (not a certified safety/quality score)."
 
 SHIFT_SECONDS = 8 * 3600.0
 
@@ -355,6 +355,6 @@ def trace_defect(db: Session, defect_id: int) -> dict:
         "traceability_note": (f"Only {obs_conf*100:.0f}% analytics confidence at the suspected "
                               "origin — results are preliminary." if limited else None),
         "caveat": TRACE_CAVEAT,
-        "disclaimer": "Digital Twin decision-support using available production, genealogy and "
+        "disclaimer": "Digital twin decision-support using available production, genealogy and "
                       "synthetic observational data — not a confirmed causal determination.",
     }

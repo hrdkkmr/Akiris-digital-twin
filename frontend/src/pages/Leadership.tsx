@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
-import { useDefectTrace, useDefects, useMaintenanceQueue, useObservabilityAdvisor, usePatterns, useRecommendations, useROI, useShadowWindows, useSimHistory, useStations, useSummary } from '../api'
-import { KpiCard, ObsLevelTag, Panel, simClock } from '../components'
+import { errMsg, useDefectTrace, useDefects, useMaintenanceQueue, useObservabilityAdvisor, usePatterns, useRecommendations, useROI, useShadowWindows, useStations, useSummary } from '../api'
+import { KpiCard, Legend, ObsLevelTag, Panel, simClock, StateNotice } from '../components'
 import { ObsAdvisorPanel, ObsAdvisorSummary } from '../ObsAdvisor'
 import { PatternCard } from '../CFAnalysis'
 import { MaintenanceCountdown, MaintenanceQueuePanel, RiskBadge, ShadowSimLab, SimHistory } from '../ShadowSim'
@@ -17,7 +17,7 @@ export default function Leadership({ onSelectStation }: { onSelectStation?: (id:
   const { data: sum } = useSummary()
   const { data: recs } = useRecommendations()
   const { data: obs } = useObservabilityAdvisor()
-  const { data: patterns } = usePatterns()
+  const { data: patterns, isLoading: patternsLoading, isError: patternsError, error: patternsErr } = usePatterns()
   const { data: stations } = useStations()
   const codeToId = Object.fromEntries((stations?.stations ?? []).map((s) => [s.code, s.id]))
 
@@ -75,6 +75,13 @@ export default function Leadership({ onSelectStation }: { onSelectStation?: (id:
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel title="Station observability (coverage → analytics confidence)"
                right={<ObsAdvisorSummary data={obs} />}>
+          <Legend items={[
+            { dot: 'bg-amber-400', label: 'Coverage < 50%' },
+            { dot: 'bg-red-400', label: 'Stale data' },
+            { dot: 'bg-red-400', label: 'Confidence < 55%' },
+            { dot: 'bg-amber-400', label: 'Confidence 55–75%' },
+            { dot: 'bg-emerald-400', label: 'Confidence ≥ 75%' },
+          ]} className="mb-2" />
           <div className="max-h-72 overflow-y-auto pr-1">
             <table className="w-full text-xs font-mono">
               <thead className="sticky top-0 bg-slate-900 text-left text-slate-500">
@@ -115,7 +122,11 @@ export default function Leadership({ onSelectStation }: { onSelectStation?: (id:
 
       <Panel title="High-impact intermittent patterns — where incidents cluster over time (Innovation 2)"
              right={<span className="text-[10px] uppercase tracking-wide text-slate-500">observed association</span>}>
-        {(patterns?.patterns.length ?? 0) === 0 && <div className="text-xs text-slate-500">No statistically meaningful patterns in the current dataset.</div>}
+        {patternsLoading && <StateNotice kind="loading" message="Scanning for conditions under which incidents cluster…" />}
+        {patternsError && <StateNotice kind="error" title="Unable to compute patterns" message={errMsg(patternsErr)} />}
+        {(patterns?.patterns.length ?? 0) === 0 && !patternsLoading && !patternsError && (
+          <StateNotice kind="empty" message="No statistically meaningful patterns in the current dataset." />
+        )}
         <div className="grid gap-2 md:grid-cols-2">
           {(patterns?.patterns ?? []).map((p, i) => <PatternCard key={i} pattern={p} />)}
         </div>
@@ -130,7 +141,12 @@ export default function Leadership({ onSelectStation }: { onSelectStation?: (id:
           onInvestigateFalseAlarms={(code) => codeToId[code] && onSelectStation?.(codeToId[code])} />
       </Panel>
 
-      <Panel title={`Top advisory actions this period (${recs?.count ?? 0})`}>
+      <Panel title={`Top advisory actions this period (${recs?.count ?? 0})`}
+             right={<Legend items={[
+               { dot: 'bg-red-400', label: 'High' },
+               { dot: 'bg-amber-400', label: 'Medium' },
+               { dot: 'bg-slate-400', label: 'Low' },
+             ]} />}>
         <div className="grid gap-2 md:grid-cols-2">
           {(recs?.recommendations.slice(0, 6) ?? []).map((r) => (
             <div key={r.id} className="rounded border border-slate-800 bg-slate-900/50 p-3 text-xs">
@@ -159,15 +175,18 @@ export default function Leadership({ onSelectStation }: { onSelectStation?: (id:
 
 /** Executive defect-propagation overview: trace a detected defect back to
  * suspected origins and forward to potentially exposed units. */
-function LeadershipTraceSection({ codeToId, onSelectStation }: {
+function LeadershipTraceSection({ onSelectStation }: {
   codeToId: Record<string, number>; onSelectStation?: (id: number) => void
 }) {
   const { data: defects } = useDefects(6)
   const [traceId, setTraceId] = useState<number | null>(null)
-  const { data: trace } = useDefectTrace(traceId)
+  const { data: trace, isLoading: traceLoading, isError: traceError, error: traceErr } = useDefectTrace(traceId)
   return (
     <Panel title="🛑 Defect propagation overview (Innovation 4)"
            right={<span className="text-[10px] uppercase tracking-widest text-slate-500">trace back · trace forward</span>}>
+      {(defects?.defects.length ?? 0) === 0 && (
+        <StateNotice kind="empty" message="No defects detected in the current window to trace." />
+      )}
       <div className="grid gap-1.5 md:grid-cols-3">
         {(defects?.defects ?? []).map((d) => (
           <div key={d.id} className="rounded border border-slate-800 bg-slate-900/50 px-2 py-1.5 text-xs">
@@ -183,6 +202,8 @@ function LeadershipTraceSection({ codeToId, onSelectStation }: {
           </div>
         ))}
       </div>
+      {traceLoading && <StateNotice kind="loading" message="Tracing the defect through production history…" />}
+      {traceError && <StateNotice kind="error" title="Unable to complete the trace" message={errMsg(traceErr)} />}
       {trace && (
         <div className="mt-2 rounded border border-slate-700/70 bg-slate-900/60 p-2.5">
           <div className="mb-1.5 flex items-center justify-between">

@@ -2,23 +2,59 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 export const BASE = (import.meta as any).env?.VITE_API_URL ?? '/api'
 
-async function api<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`)
-  if (!res.ok) throw new Error(`API ${res.status}: ${path}`)
-  return res.json() as Promise<T>
+/** Structured API error — carries the HTTP status and a human-readable message. */
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
 }
 
-async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+/** Shared fetch: checks HTTP status first, reads the body safely (JSON or
+ * plain text), and surfaces a meaningful message instead of a JSON parse
+ * crash like "Unexpected token 'I', 'Internal S...' is not valid JSON". */
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, init)
+  } catch {
+    throw new ApiError(0, 'Unable to reach the Akiris server. Check that the backend is running and try again.')
+  }
+  const text = await res.text().catch(() => '')
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const body = JSON.parse(text)
+      detail = typeof body?.detail === 'string' ? body.detail
+        : typeof body?.error === 'string' ? body.error : ''
+    } catch { detail = text }
+    throw new ApiError(res.status,
+      detail || `The server returned an error (HTTP ${res.status}).`)
+  }
+  if (!text) return undefined as T
+  try { return JSON.parse(text) as T } catch {
+    throw new ApiError(res.status, 'The server returned an unexpected response format.')
+  }
+}
+
+/** Render-safe error message for UI error states. */
+export function errMsg(e: unknown): string {
+  if (e instanceof ApiError) return e.message
+  if (e instanceof Error) return e.message
+  return 'Something went wrong. Please try again.'
+}
+
+async function api<T>(path: string): Promise<T> {
+  return apiFetch<T>(path)
+}
+
+export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    let msg = `API ${res.status}: ${path}`
-    try { msg = (await res.json())?.detail ?? msg } catch { /* keep default */ }
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
-  }
-  return res.json() as Promise<T>
 }
 
 // ---------- types (mirror backend responses) ----------
@@ -174,7 +210,7 @@ export type QueueItem = {
   target_window: number; status: string
 }
 const postJson = <T>(url: string, body: unknown) =>
-  fetch(`${BASE}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<T>)
+  apiPost<T>(url, body)
 
 export const useShadowChanges = () =>
   useQuery({ queryKey: ['shadow-changes'], queryFn: () => api<{ mode: string; count: number; changes: ShadowChange[] }>('/shadow/changes'), staleTime: 60_000 })
@@ -216,7 +252,7 @@ export type TrustHistoryRow = { id: number; vehicle_id: number; vin: string; cre
 export type StationTrust = { station: string; predictions: number; validated: number; precision: number; recall: number; false_alarm_rate: number; tp: number; fp: number }
 export type PredictionTrust = {
   generated_at: number; note: string
-  overall: { validated: number; pending: number; precision?: number; recall?: number; false_alarm_rate?: number; f1?: number; accuracy?: number; tp?: number; fp?: number; tn?: number; fn?: number; insufficient?: boolean }
+  overall: { validated: number; pending: number; precision?: number; recall?: number; false_alarm_rate?: number; f1?: number; accuracy?: number; fpr?: number; fnr?: number; tp?: number; fp?: number; tn?: number; fn?: number; insufficient?: boolean }
   history: TrustHistoryRow[]
   station_trust: StationTrust[]
   false_alarm_monitor: { rate: number; worst_station: string | null; alarms: number; false_alarms: number; trend: { bucket: number; alarms: number; false_alarm_rate: number }[]; direction: string }
@@ -230,8 +266,14 @@ export type PredictionTrust = {
 }
 export const usePredictionTrust = () =>
   useQuery({ queryKey: ['pred-trust'], queryFn: () => api<PredictionTrust>('/predictions/trust'), staleTime: 15_000, refetchInterval: 60_000 })
-export const retrainCandidate = () => postJson<Record<string, unknown>>('/predictions/trust/retrain', {})
+/** Revalidate the prediction system on validated outcomes → creates a
+ * candidate prediction policy for human review (never touches production). */
+export const revalidateCandidate = () => postJson<Record<string, unknown>>('/predictions/trust/revalidate', {})
+// legacy alias kept for callers of the old endpoint name
+export const retrainCandidate = revalidateCandidate
 export const approveCandidate = (approve: boolean) => postJson<Record<string, unknown>>('/predictions/trust/approve', { approve })
-export const deployCandidate = () => postJson<Record<string, unknown>>('/predictions/trust/deploy', {})
+/** Controlled deployment — backend-gated to the maintenance window.
+ * simulateWindow=true explicitly simulates window execution (prototype). */
+export const deployCandidate = (simulateWindow = false) => postJson<Record<string, unknown>>('/predictions/trust/deploy', { simulate_window: simulateWindow })
 export const useVehicleDefect = (vehicleId: number | null) =>
   useQuery({ queryKey: ['vehicle-defect', vehicleId], queryFn: () => api<{ count: number; defects: DefectRow[] }>(`/defects?vehicle_id=${vehicleId}&limit=1`), enabled: vehicleId !== null, staleTime: 30_000 })
