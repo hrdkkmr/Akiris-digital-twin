@@ -12,14 +12,16 @@ from sqlalchemy import engine_from_config, pool
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import get_settings  # noqa: E402
-from app.db.session import Base  # noqa: E402
+from app.db.session import Base, _normalize_sqlite_url  # noqa: E402
 import app.models  # noqa: F401,E402  (register all tables on Base.metadata)
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Same path normalization as the app (relative sqlite paths -> repo root,
+# parent dir created) so migrations work from any CWD / fresh checkout.
+config.set_main_option("sqlalchemy.url", _normalize_sqlite_url(get_settings().database_url))
 target_metadata = Base.metadata
 
 

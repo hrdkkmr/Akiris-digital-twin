@@ -274,6 +274,26 @@ only).
   `tsc --noEmit --noUnusedLocals --noUnusedParameters`), `REPORT_DISCLAIMER`
   dead constant removed, `useMaintenanceQueue` dead import dropped.
 
+## CI / database-path fix (readiness on fresh checkouts)
+GitHub Actions failed `test_readiness_and_trends` with `/ready` → 503
+(`sqlite3.OperationalError: unable to open database file`): a fresh checkout has
+no `data/generated/` (the DB is gitignored) and `make_engine()` never created
+the parent directory.
+
+- **`backend/app/db/session.py`** — centralized `_normalize_sqlite_url()`: parses
+  the URL with `make_url`, creates the SQLite parent dir before any connection,
+  resolves *relative* sqlite paths against the repo root (CWD-independent,
+  fixes the `.env.example` relative-path form too), leaves `:memory:` /
+  absolute / Windows drive paths / all non-SQLite dialects (e.g.
+  `postgresql://`) untouched. Applied in `make_engine()` — the single choke
+  point for the app engine, `init_db()`, `/ready`'s `SessionLocal` and test
+  fixtures.
+- **`backend/alembic/env.py`** — migration URL uses the same helper so
+  `alembic upgrade head` works from any CWD / fresh checkout.
+- Verified: `pytest` 18/18 on the working tree **and** on a clean clone with
+  `data/generated` absent; live `/health` and `/ready` → 200 with the directory
+  auto-created at boot; `npm run build` still passes.
+
 ---
 
 ## Files changed / added (Innovations 4 & 5 + UI enhancement)
@@ -282,8 +302,9 @@ only).
   routes incl. `/predictions/trust/revalidate`, deploy payload
   `{simulate_window}`), `models/analytics.py` (ModelVersion.status,
   MaintenanceQueueItem.item_type + nullable scenario_id), `db/session.py`
-  (idempotent `ensure_schema` migration), `services/shadow_sim.py`,
-  `services/defect_traceback.py` (copy wording)
+  (idempotent `ensure_schema` migration + `_normalize_sqlite_url` CI fix),
+  `alembic/env.py` (CI fix), `services/shadow_sim.py` (+ single-category
+  change-set crash fix), `services/defect_traceback.py` (copy wording)
 - **New frontend:** `DefectTraceback.tsx`, `PredictionTrust.tsx`,
   `ObsAdvisor.tsx` (rewrite), `CFAnalysis.tsx` (edits), `ShadowSim.tsx`
   (rewrite)

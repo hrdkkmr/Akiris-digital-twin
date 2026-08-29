@@ -1,18 +1,53 @@
 """Engine/session factory. Same models run on SQLite (local) or PostgreSQL (docker)."""
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from ..core.config import get_settings
+from ..core.config import ROOT, get_settings
+
+# Windows absolute paths look like "C:\\..." or "C:/..."; without this guard they
+# would be mis-detected as relative on POSIX hosts. (No machine-specific path is
+# hardcoded — this only prevents treating a drive-qualified path as relative.)
+_WIN_DRIVE_PREFIX = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 class Base(DeclarativeBase):
     pass
 
 
+def _normalize_sqlite_url(url: str) -> str:
+    """Make a file-based SQLite URL safe to open from any working directory.
+
+    - Resolves *relative* paths against the repository root (``ROOT``) so the
+      database lands in the same place whether the process runs from the repo
+      root, ``backend/``, a script, or CI (CWD-independent).
+    - Creates the parent directory before SQLite ever opens the file. Fresh CI
+      checkouts have no ``data/generated/`` because ``*.db`` is gitignored;
+      without this, the first connect fails with
+      ``sqlite3.OperationalError: unable to open database file``.
+    - Absolute paths, in-memory databases (``:memory:``) and every non-SQLite
+      dialect (e.g. ``postgresql://``) are returned unchanged.
+    """
+    parsed = make_url(url)
+    if not parsed.get_backend_name().startswith("sqlite"):
+        return url  # postgres & friends: no path handling, behavior preserved
+    db = parsed.database
+    if not db or db == ":memory:":
+        return url  # in-memory sqlite: there is no file to create
+    path = Path(db)
+    if not path.is_absolute() and not _WIN_DRIVE_PREFIX.match(db):
+        path = ROOT / path  # relative -> repo root (independent of CWD)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return parsed.set(database=str(path)).render_as_string(hide_password=False)
+
+
 def make_engine(url: str | None = None):
-    url = url or get_settings().database_url
+    url = _normalize_sqlite_url(url or get_settings().database_url)
     kwargs = {"pool_pre_ping": True, "future": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
