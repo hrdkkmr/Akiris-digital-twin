@@ -112,3 +112,126 @@ export const useMlRefresh = () => {
     onSuccess: () => { void qc.invalidateQueries() },
   })
 }
+
+// ---------- Innovation 1 — Observability Advisor ----------
+export type ObsRec = { action_type: string; text: string; detail?: string }
+export type ObsRow = {
+  station_id: number; code: string; zone: string; archetype: string
+  sensor_profile: string; coverage: number; completeness: number
+  freshness: string; freshness_s: number; anomaly_rate: number; confidence: number
+  observability_level: string; identified_gap: string
+  recommendations: ObsRec[]; projected_confidence: number | null
+  priority: string; rationale: string; is_bottleneck: boolean
+}
+export type ObsResp = { generated_at: number; disclaimer: string; summary: Record<string, number>; stations: ObsRow[] }
+export const useObservabilityAdvisor = () =>
+  useQuery({ queryKey: ['obs-advisor'], queryFn: () => api<ObsResp>('/observability/advisor'), refetchInterval: 30_000 })
+
+// ---------- Innovation 2 — Multi-causal contributing-factor analysis ----------
+export type CFFactor = { factor: string; label: string; score: number; strength: string; evidence: string[] }
+export type CFPattern = { type: string; title: string; description: string; strength: string; statistics: Record<string, number | string> }
+export type CFResp = {
+  station: string; station_id: number; zone: string; archetype: string
+  incident_type: string; bottleneck: { status: string; score: number } | null
+  factors: CFFactor[]; intermittent_patterns: CFPattern[]
+  evidence_matrix: { legend: string[]; matrix: Record<string, Record<string, string>>; stations: string[] }
+  analysis_note: string | null; disclaimer: string; caveat: string
+}
+export type VehicleCFResp = {
+  vehicle: string; vehicle_id: number; batch: string | null; shift: string
+  outcome: { status: string }; factors: CFFactor[]
+  genealogy_note: string; disclaimer: string; caveat: string
+}
+// on-demand analysis (few seconds) — no refetch interval, long stale time
+export const useStationFactors = (stationId: number | null) =>
+  useQuery({ queryKey: ['cf-station', stationId], queryFn: () => api<CFResp>(`/contributing-factors/${stationId}`), enabled: stationId !== null, staleTime: 5 * 60_000 })
+export const useVehicleCF = (vehicleId: number | null) =>
+  useQuery({ queryKey: ['cf-vehicle', vehicleId], queryFn: () => api<VehicleCFResp>(`/contributing-factors/vehicle/${vehicleId}`), enabled: vehicleId !== null, staleTime: 5 * 60_000 })
+export const usePatterns = () =>
+  useQuery({ queryKey: ['cf-patterns'], queryFn: () => api<{ patterns: CFPattern[] }>('/contributing-factors/patterns'), staleTime: 5 * 60_000 })
+
+// ---------- Innovation 3 — Safe change validation + shadow simulation ----------
+export type ShadowChange = {
+  id: string; kind: string; station: string; title: string
+  current: string; proposed: string; reason: string; impact: string
+  expected: string; selected?: boolean
+}
+export type ShadowWindows = {
+  now: number; next_window_start: number; next_window_end: number
+  countdown_s: number; duration_h: number; window_label: string
+  queued_items: number; capacity: number
+}
+export type SimScenario = {
+  id: number; name: string; created_at: number; status: string
+  changes: ShadowChange[]; current_metrics: Record<string, number | string>
+  shadow_metrics: Record<string, number | string>
+  risk_level: string; risk_detail: { level: string; score: number; details: string[]; note: string }
+  warnings: string[]; recommendation: string | null; maintenance_status: string; note: string
+}
+export type QueueItem = {
+  id: number; scenario_id: number; station_code: string; change: string
+  priority: string; risk_level: string; estimated_duration_min: number
+  target_window: number; status: string
+}
+const postJson = <T>(url: string, body: unknown) =>
+  fetch(`${BASE}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<T>)
+
+export const useShadowChanges = () =>
+  useQuery({ queryKey: ['shadow-changes'], queryFn: () => api<{ mode: string; count: number; changes: ShadowChange[] }>('/shadow/changes'), staleTime: 60_000 })
+export const useShadowWindows = () =>
+  useQuery({ queryKey: ['shadow-windows'], queryFn: () => api<ShadowWindows>('/shadow/windows'), staleTime: 30_000, refetchInterval: 30_000 })
+export const useSimHistory = () =>
+  useQuery({ queryKey: ['sim-history'], queryFn: () => api<{ count: number; scenarios: SimScenario[] }>('/shadow/scenarios'), staleTime: 15_000 })
+export const useMaintenanceQueue = () =>
+  useQuery({ queryKey: ['maint-queue'], queryFn: () => api<{ count: number; items: QueueItem[] }>('/shadow/queue'), staleTime: 15_000 })
+export const useScenarioDetail = (id: number | null) =>
+  useQuery({ queryKey: ['sim-scenario', id], queryFn: () => api<SimScenario>(`/shadow/scenarios/${id}`), enabled: id !== null, staleTime: 0 })
+export const createScenario = (changes: ShadowChange[]) => postJson<SimScenario>('/shadow/scenarios', { changes })
+export const runScenario = (id: number) => postJson<SimScenario>(`/shadow/scenarios/${id}/run`, {})
+export const queueScenario = (id: number, acknowledge = true) => postJson<{ status: string; scenario: string; items: number; target_window: number; note?: string; error?: string }>(`/shadow/scenarios/${id}/queue`, { acknowledge })
+
+// ---------- Innovation 4 — Defect traceback & propagation ----------
+export type DefectRow = { id: number; vehicle_id: number; vin: string; station: string; t: number; severity: string }
+export type SuspectedOrigin = { station_id: number; code: string; zone: string; score: number; strength: string; pass_t: number; evidence: string[] }
+export type ExposedUnit = { vehicle_id: number; vin: string; status: string; batch: string | null; shift: string; exposure_level: string; exposure_ts: number; confirmed_defect: boolean }
+export type DefectTrace = {
+  defect_id: number; defect_severity: string; vehicle: string; vehicle_id: number; batch: string | null
+  detected_at: number; detection_station: string; journey: string[]
+  suspected_origins: SuspectedOrigin[]; multiple_plausible_origins: boolean
+  exposure_window: { station: string; start: number; end: number; confidence: string; reason: string[] } | null
+  potentially_exposed_units: { total: number; confirmed_defects: number; potentially_affected: number; units: ExposedUnit[] }
+  common_exposures: { factor: string; value: string; share: number; label: string }[]
+  propagation_risk: { level: string; score: number; note: string; drivers: Record<string, number | string | boolean> }
+  containment_recommendations: string[]
+  inspection_priority: Record<string, number>
+  data_confidence: string; traceability_note: string | null; caveat: string; disclaimer: string
+}
+export const useDefects = (limit = 12) =>
+  useQuery({ queryKey: ['defects', limit], queryFn: () => api<{ count: number; defects: DefectRow[] }>(`/defects?limit=${limit}`), staleTime: 30_000 })
+export const useDefectTrace = (defectId: number | null) =>
+  useQuery({ queryKey: ['defect-trace', defectId], queryFn: () => api<DefectTrace>(`/defects/${defectId}/trace`), enabled: defectId !== null, staleTime: 5 * 60_000 })
+
+// ---------- Innovation 5 — Prediction validation & AI trust ----------
+export type TrustHistoryRow = { id: number; vehicle_id: number; vin: string; created_at: number; probability: number; confidence: number; actual: boolean | null; model_version: string; station: string | null; result: string }
+export type StationTrust = { station: string; predictions: number; validated: number; precision: number; recall: number; false_alarm_rate: number; tp: number; fp: number }
+export type PredictionTrust = {
+  generated_at: number; note: string
+  overall: { validated: number; pending: number; precision?: number; recall?: number; false_alarm_rate?: number; f1?: number; accuracy?: number; tp?: number; fp?: number; tn?: number; fn?: number; insufficient?: boolean }
+  history: TrustHistoryRow[]
+  station_trust: StationTrust[]
+  false_alarm_monitor: { rate: number; worst_station: string | null; alarms: number; false_alarms: number; trend: { bucket: number; alarms: number; false_alarm_rate: number }[]; direction: string }
+  confidence_bins: { range: string; n: number; correct_rate: number }[]
+  observability_notes: { station: string; precision: number; coverage: number; analytics_confidence: number; note: string }[]
+  model_management: {
+    production: { id: number; version: string; metrics: Record<string, number | string>; status: string } | null
+    candidate: { id: number; version: string; metrics: Record<string, number | string>; status: string } | null
+    next_window_start: number; countdown_s: number; window_label: string
+  }
+}
+export const usePredictionTrust = () =>
+  useQuery({ queryKey: ['pred-trust'], queryFn: () => api<PredictionTrust>('/predictions/trust'), staleTime: 15_000, refetchInterval: 60_000 })
+export const retrainCandidate = () => postJson<Record<string, unknown>>('/predictions/trust/retrain', {})
+export const approveCandidate = (approve: boolean) => postJson<Record<string, unknown>>('/predictions/trust/approve', { approve })
+export const deployCandidate = () => postJson<Record<string, unknown>>('/predictions/trust/deploy', {})
+export const useVehicleDefect = (vehicleId: number | null) =>
+  useQuery({ queryKey: ['vehicle-defect', vehicleId], queryFn: () => api<{ count: number; defects: DefectRow[] }>(`/defects?vehicle_id=${vehicleId}&limit=1`), enabled: vehicleId !== null, staleTime: 30_000 })

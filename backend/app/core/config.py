@@ -41,6 +41,21 @@ class Settings(BaseSettings):
     assumed_defect_reduction_pct: float = 0.15   # scenario knob, labeled as assumption
     assumed_downtime_reduction_pct: float = 0.05
 
+    # --- Observability Advisor (Innovation 1) — classification thresholds ---
+    obs_high_confidence: float = 0.75     # >= this => high observability (absent other gaps)
+    obs_medium_confidence: float = 0.55   # >= this => medium; below => low
+    obs_critical_confidence: float = 0.35  # below => critical observability gap
+    obs_low_coverage: float = 0.5         # coverage below this => instrumentation gap
+    obs_critical_coverage: float = 0.3    # coverage below this => critical gap
+    obs_completeness_min: float = 0.75    # below this => data-quality action
+    obs_stale_s: float = 600.0            # freshness beyond this => stale (matches data_quality)
+
+    # --- Safe change validation / shadow simulation (Innovation 3) ---
+    maint_window_start_h: float = 6.0     # next maintenance window begins at 06:00 (sim clock)
+    maint_window_duration_h: float = 2.0  # window length
+    maint_window_interval_h: float = 24.0  # windows repeat daily
+    maint_max_queue_items: int = 8        # queue capacity per window (capacity check in UI)
+
 
 @lru_cache
 def get_settings() -> Settings:

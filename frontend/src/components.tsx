@@ -91,3 +91,41 @@ export function simClock(t: number | undefined): string {
   const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = Math.floor(t % 60)
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
+
+// ---------- Innovation 1 — Observability Advisor tags ----------
+const PRIORITY_STYLE: Record<string, string> = {
+  CRITICAL: 'bg-red-600/30 text-red-200 border-red-700/50',
+  HIGH: 'bg-amber-600/30 text-amber-200 border-amber-700/50',
+  MEDIUM: 'bg-cyan-700/30 text-cyan-200 border-cyan-800/50',
+  LOW: 'bg-slate-700/50 text-slate-300 border-slate-700',
+}
+export function PriorityTag({ priority }: { priority: string }) {
+  return (
+    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${PRIORITY_STYLE[priority] ?? PRIORITY_STYLE.LOW}`}>
+      {priority}
+    </span>
+  )
+}
+
+const OBS_LEVEL_STYLE: Record<string, string> = {
+  HIGH: 'text-emerald-300',
+  MEDIUM: 'text-cyan-300',
+  LOW: 'text-amber-300',
+  CRITICAL_GAP: 'text-red-300',
+}
+export function ObsLevelTag({ level }: { level: string }) {
+  const label = level === 'CRITICAL_GAP' ? 'CRITICAL GAP' : level
+  return <span className={`font-mono text-xs font-semibold ${OBS_LEVEL_STYLE[level] ?? 'text-slate-400'}`}>{label}</span>
+}
+
+export function ObsActionTag({ action }: { action: string }) {
+  const map: Record<string, string> = {
+    ADD_SENSOR: 'bg-violet-600/25 text-violet-200 border-violet-700/50',
+    IMPROVE_COVERAGE: 'bg-cyan-700/25 text-cyan-200 border-cyan-800/50',
+    MANUAL_INSPECTION: 'bg-amber-600/25 text-amber-200 border-amber-700/50',
+    FRESHNESS_ACTION: 'bg-orange-600/25 text-orange-200 border-orange-700/50',
+    DATA_QUALITY_ACTION: 'bg-slate-600/25 text-slate-200 border-slate-700',
+  }
+  const label = action.replace(/_/g, ' ').toLowerCase()
+  return <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${map[action] ?? map.DATA_QUALITY_ACTION}`}>{label}</span>
+}

@@ -1,12 +1,18 @@
 import React, { useState } from 'react'
-import { useFactors, useJourney } from './api'
-import { ConfidenceTag, Panel } from './components'
+import { useDefectTrace, useJourney, useVehicleCF, useVehicleDefect } from './api'
+import { Panel } from './components'
+import { VehicleCFAnalysis } from './CFAnalysis'
+import { DefectTracePanel } from './DefectTraceback'
 
 /** Vehicle production journey (digital thread) + ranked contributing factors. */
 export function VehiclePanel({ vehicleId, onClose }: { vehicleId: number; onClose: () => void }) {
   const [truth, setTruth] = useState(false)
   const { data, isLoading } = useJourney(vehicleId, truth)
-  const { data: factors } = useFactors(vehicleId)
+  const { data: cf, isLoading: cfLoading } = useVehicleCF(vehicleId)
+  const { data: vdef } = useVehicleDefect(vehicleId)
+  const [showTrace, setShowTrace] = useState(false)
+  const defectId = vdef?.defects?.[0]?.id ?? null
+  const { data: trace } = useDefectTrace(showTrace ? defectId : null)
 
   return (
     <div className="fixed inset-0 z-40 flex justify-center bg-black/60 p-6" onClick={onClose}>
@@ -21,8 +27,14 @@ export function VehiclePanel({ vehicleId, onClose }: { vehicleId: number; onClos
               </span>
             </h2>
             {data?.outcome.defect_found_at && (
-              <div className="mt-1 text-xs text-red-300">
-                defect surfaced at inspection <b className="font-mono">{data.outcome.defect_found_at}</b> — upstream origin may be earlier
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-red-300">
+                <span>defect surfaced at inspection <b className="font-mono">{data.outcome.defect_found_at}</b> — upstream origin may be earlier</span>
+                {defectId && (
+                  <button onClick={() => setShowTrace((s) => !s)}
+                          className={`rounded-md px-2 py-0.5 text-[10px] font-semibold transition ${showTrace ? 'bg-cyan-800/70 text-white' : 'border border-red-700/60 bg-red-950/40 text-red-200 hover:bg-red-900/50'}`}>
+                    {showTrace ? '✕ close trace' : 'TRACE DEFECT'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -75,25 +87,16 @@ export function VehiclePanel({ vehicleId, onClose }: { vehicleId: number; onClos
             </div>
 
             <div className="space-y-4">
-              <Panel title={factors?.language ?? 'Likely contributing factors'}>
-                {factors?.candidates.length === 0 && <div className="text-xs text-slate-400">no strong evidence — defect may be stochastic</div>}
-                <ul className="space-y-2">
-                  {factors?.candidates.map((c, i) => (
-                    <li key={i} className="rounded border border-slate-800 bg-slate-900/50 p-2 text-xs">
-                      <div className="flex items-center justify-between font-mono">
-                        <span className="text-cyan-300">{c.station ?? (c.type === 'batch_evidence' ? 'BATCH' : '?')}</span>
-                        <span>{(c.contribution * 100).toFixed(0)}%</span>
-                      </div>
-                      <div className="mt-1 h-1.5 rounded bg-slate-800">
-                        <div className="h-1.5 rounded bg-cyan-500" style={{ width: `${c.contribution * 100}%` }} />
-                      </div>
-                      <ul className="mt-1 list-inside list-disc text-[10px] text-slate-400">
-                        {c.evidence.map((e, j) => <li key={j}>{e}</li>)}
-                      </ul>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-2 text-[10px] italic text-slate-500">{factors?.caveat}</div>
+              {showTrace && trace && (
+                <Panel title="🛑 Defect traceback & propagation (Innovation 4)"
+                       right={<span className="text-[10px] uppercase tracking-widest text-slate-500">suspected origin · potential exposure</span>}>
+                  <DefectTracePanel trace={trace} />
+                </Panel>
+              )}
+              <Panel title="🔍 Contributing-factor analysis (Innovation 2)"
+                     right={cf ? <span className="text-[10px] text-slate-500">{cf.batch ? `batch ${cf.batch} · shift ${cf.shift}` : `shift ${cf.shift}`}</span> : undefined}>
+                {cfLoading && <div className="text-xs text-slate-400">correlating genealogy, batch & shift evidence…</div>}
+                {cf && <VehicleCFAnalysis data={cf} />}
               </Panel>
 
               {truth && data.outcome.true_root_causes && (

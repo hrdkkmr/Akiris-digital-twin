@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 from ..models import (Anomaly, ModelVersion, Prediction, Recommendation,
                       Station, Vehicle)
 from ..services.bottleneck import compute_bottlenecks
-from .deps import get_db, get_line_or_404
+from ..services.contributing_factors import (analyze_station_contributing_factors,
+                                             analyze_vehicle_contributing_factors,
+                                             detect_intermittent_patterns,
+                                             evidence_matrix)
+from ..services.observability_advisor import compute_observability_advisor
+from ..services import defect_traceback, prediction_trust, shadow_sim
+from .deps import get_db, get_line_or_404, get_station_or_404, get_vehicle_or_404
 
 router = APIRouter(tags=["analytics"])
 
@@ -19,6 +25,61 @@ def bottlenecks(window_s: float | None = Query(None, description="analysis windo
                 line_id: int | None = None, db: Session = Depends(get_db)):
     line = get_line_or_404(db, line_id)
     return compute_bottlenecks(db, line.id, window_s=window_s)
+
+
+@router.get("/observability/advisor")
+def observability_advisor(line_id: int | None = None, db: Session = Depends(get_db)):
+    """Innovation 1 — Observability Advisor: per-station instrumentation-gap
+    analysis with recommended actions, projected confidence (estimated) and
+    priority, so the plant can act on poor observability instead of just
+    seeing it."""
+    line = get_line_or_404(db, line_id)
+    return compute_observability_advisor(db, line.id)
+
+
+@router.get("/contributing-factors/patterns")
+def contributing_patterns(line_id: int | None = None, db: Session = Depends(get_db)):
+    """Innovation 2 — line-wide intermittent patterns (shift / tool-wear /
+    batch / environment) from historical data, with min-sample guards."""
+    line = get_line_or_404(db, line_id)
+    return {"disclaimer": "Observed associations from available data; not a causal determination.",
+            "patterns": detect_intermittent_patterns(db, line.id)}
+
+
+@router.get("/contributing-factors/{station_ident}")
+def contributing_factors_station(station_ident: str,
+                                 line_id: int | None = None,
+                                 db: Session = Depends(get_db)):
+    """Innovation 2 — ranked likely contributing factors for an incident at a
+    station (bottleneck / defect risk / degradation). station_ident is the
+    station code (e.g. S17) or numeric id."""
+    line = get_line_or_404(db, line_id)
+    if station_ident.isdigit():
+        st = get_station_or_404(db, int(station_ident))
+        return analyze_station_contributing_factors(db, line.id, station_id=st.id)
+    return analyze_station_contributing_factors(db, line.id, station_code=station_ident)
+
+
+@router.get("/contributing-factors/vehicle/{vehicle_id}")
+def contributing_factors_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
+    """Innovation 2 — genealogy-based contributing factors for a vehicle."""
+    get_vehicle_or_404(db, vehicle_id)
+    return analyze_vehicle_contributing_factors(db, vehicle_id)
+
+
+@router.get("/evidence-matrix/{station_ident}")
+def evidence_matrix_endpoint(station_ident: str,
+                             line_id: int | None = None,
+                             db: Session = Depends(get_db)):
+    """Innovation 2 — factor x station evidence-strength grid around a station."""
+    line = get_line_or_404(db, line_id)
+    st = (get_station_or_404(db, int(station_ident)) if station_ident.isdigit()
+          else db.query(Station).filter(Station.line_id == line.id,
+                                        Station.code == station_ident).first())
+    if not st:
+        from fastapi import HTTPException
+        raise HTTPException(404, f"station {station_ident} not found")
+    return evidence_matrix(db, line.id, st.id)
 
 
 @router.get("/anomalies")
@@ -111,6 +172,128 @@ def model_performance(db: Session = Depends(get_db)):
             "trained_at": m.trained_at, "metrics": m.metrics} for m in versions],
         "live_prediction_metrics": live,
     }
+
+
+# --- Innovation 3: Safe change validation + shadow simulation ---
+@router.get("/shadow/changes")
+def shadow_proposed_changes(line_id: int | None = None, db: Session = Depends(get_db)):
+    """Innovation 3 — proposed-changes library, generated from the current
+    line state + existing recommendations/observability advisor."""
+    line = get_line_or_404(db, line_id)
+    return shadow_sim.proposed_changes(db, line.id)
+
+
+@router.get("/shadow/windows")
+def shadow_windows(line_id: int | None = None, db: Session = Depends(get_db)):
+    line = get_line_or_404(db, line_id)
+    return shadow_sim.maintenance_windows(db, line.id)
+
+
+@router.get("/shadow/scenarios")
+def shadow_scenarios(line_id: int | None = None, db: Session = Depends(get_db)):
+    line = get_line_or_404(db, line_id)
+    return shadow_sim.scenario_history(db, line.id)
+
+
+@router.post("/shadow/scenarios")
+def shadow_create_scenario(payload: dict, line_id: int | None = None,
+                           db: Session = Depends(get_db)):
+    line = get_line_or_404(db, line_id)
+    try:
+        return shadow_sim.create_scenario(db, line.id, payload.get("changes", []))
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@router.get("/shadow/scenarios/{scenario_id}")
+def shadow_scenario_detail(scenario_id: int, db: Session = Depends(get_db)):
+    try:
+        return shadow_sim.scenario_view(db, scenario_id)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@router.post("/shadow/scenarios/{scenario_id}/run")
+def shadow_run(scenario_id: int, db: Session = Depends(get_db)):
+    try:
+        return shadow_sim.run_shadow(db, scenario_id)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@router.post("/shadow/scenarios/{scenario_id}/status")
+def shadow_status(scenario_id: int, payload: dict, db: Session = Depends(get_db)):
+    try:
+        return shadow_sim.set_scenario_status(db, scenario_id, payload.get("status", "complete"))
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@router.post("/shadow/scenarios/{scenario_id}/queue")
+def shadow_queue(scenario_id: int, payload: dict, db: Session = Depends(get_db)):
+    """Queue the scenario's changes for the next maintenance window.
+    HIGH simulated risk requires explicit acknowledgement (human approval)."""
+    try:
+        return shadow_sim.queue_for_maintenance(
+            db, scenario_id, acknowledge=payload.get("acknowledge", True))
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@router.get("/shadow/queue")
+def shadow_queue_view(line_id: int | None = None, db: Session = Depends(get_db)):
+    line = get_line_or_404(db, line_id)
+    return shadow_sim.maintenance_queue(db, line.id)
+
+
+# --- Innovation 4: Defect traceback & propagation analysis ---
+@router.get("/defects")
+def defects_list(limit: int = Query(30, le=200), vehicle_id: int | None = None,
+                 line_id: int | None = None, db: Session = Depends(get_db)):
+    line = get_line_or_404(db, line_id)
+    return defect_traceback.list_defects(db, line.id, limit=limit, vehicle_id=vehicle_id)
+
+
+@router.get("/defects/{defect_id}/trace")
+def defect_trace(defect_id: int, db: Session = Depends(get_db)):
+    """Innovation 4 — trace a detected defect backward to suspected origins,
+    forward to potentially exposed units, and derive propagation risk +
+    containment recommendations (observed associations, never confirmed root cause)."""
+    return defect_traceback.trace_defect(db, defect_id)
+
+
+# --- Innovation 5: Prediction validation & AI trust ---
+@router.get("/predictions/trust")
+def prediction_trust_view(line_id: int | None = None, db: Session = Depends(get_db)):
+    """Innovation 5 — validated-prediction metrics, station-level trust,
+    false-alarm monitor, and the production/candidate model lifecycle."""
+    line = get_line_or_404(db, line_id)
+    return prediction_trust.compute_prediction_trust(db, line.id)
+
+
+@router.post("/predictions/trust/retrain")
+def prediction_retrain_view(line_id: int | None = None, db: Session = Depends(get_db)):
+    """Create a CANDIDATE model by revalidating on the validated-outcome corpus.
+    Production is never changed here."""
+    line = get_line_or_404(db, line_id)
+    return prediction_trust.retrain_candidate(db, line.id)
+
+
+@router.post("/predictions/trust/approve")
+def prediction_approve_view(payload: dict, line_id: int | None = None,
+                            db: Session = Depends(get_db)):
+    """Human approval for the candidate model. Approval schedules deployment
+    via the existing maintenance-window workflow; rejection retires the candidate."""
+    line = get_line_or_404(db, line_id)
+    return prediction_trust.approve_candidate(db, line.id, approve=payload.get("approve", False))
+
+
+@router.post("/predictions/trust/deploy")
+def prediction_deploy_view(line_id: int | None = None, db: Session = Depends(get_db)):
+    """Simulate maintenance-window execution: promote the approved candidate
+    to production (controlled deployment)."""
+    line = get_line_or_404(db, line_id)
+    return prediction_trust.deploy_candidate(db, line.id)
 
 
 @router.get("/recommendations")

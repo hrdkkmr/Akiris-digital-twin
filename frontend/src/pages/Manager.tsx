@@ -1,7 +1,12 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Bar, BarChart, Cell, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts'
-import { useBottlenecks, useDQ, useModelPerf, useSummary, useTrends } from '../api'
-import { KpiCard, Panel } from '../components'
+import { useBottlenecks, useDefectTrace, useDefects, useDQ, useMaintenanceQueue, useModelPerf, useObservabilityAdvisor, usePatterns, useShadowWindows, useStationFactors, useSummary, useTrends } from '../api'
+import { KpiCard, Panel, simClock } from '../components'
+import { ObsAdvisorSummary } from '../ObsAdvisor'
+import { FactorBar, PatternCard } from '../CFAnalysis'
+import { MaintenanceQueuePanel, ShadowSimLab, SimHistory } from '../ShadowSim'
+import { DefectTracePanel } from '../DefectTraceback'
+import { PredictionTrustPanel } from '../PredictionTrust'
 
 /** PLANT MANAGER — shift/week trends: throughput, FPY, bottleneck ranking,
  * defect mix, observability and model trust. */
@@ -12,6 +17,14 @@ export default function Manager() {
   const { data: dq } = useDQ()
   const { data: perf } = useModelPerf()
   const { data: trends } = useTrends(50)
+  const { data: obs } = useObservabilityAdvisor()
+  const { data: patterns } = usePatterns()
+  const { data: win } = useShadowWindows()
+  const queueItems = useQueueItems()
+  const { data: topCF, isLoading: topCFLoading } = useStationFactors(bn?.top?.station_id ?? null)
+  const { data: defects } = useDefects(8)
+  const [traceId, setTraceId] = useState<number | null>(null)
+  const { data: trace } = useDefectTrace(traceId)
 
   const bnChart = (bn?.ranking ?? []).slice(0, 10).map((r) => ({ code: r.code, score: r.score, status: r.status }))
   const zoneData = Object.entries(sum?.defects_by_zone_found ?? {}).map(([zone, n]) => ({ zone, defects: n }))
@@ -74,6 +87,27 @@ export default function Manager() {
         </Panel>
       </div>
 
+      <Panel title="Intermittent patterns — conditions under which incidents occur disproportionately (Innovation 2)"
+             right={<span className="text-[10px] uppercase tracking-wide text-slate-500">correlation, not causation</span>}>
+        {(patterns?.patterns.length ?? 0) === 0 && <div className="text-xs text-slate-500">No statistically meaningful patterns in the current dataset (min-sample guard applied).</div>}
+        <div className="grid gap-2 md:grid-cols-2">
+          {(patterns?.patterns ?? []).map((p, i) => <PatternCard key={i} pattern={p} />)}
+        </div>
+      </Panel>
+
+      {topCF && (
+        <Panel title={`Contributing factors at the current constraint ${topCF.station}`}
+               right={<span className="text-[10px] uppercase tracking-wide text-slate-500">relative evidence · {topCF.bottleneck?.status}</span>}>
+          {topCFLoading ? <div className="text-xs text-slate-400">analyzing…</div> : (
+            <div className="grid gap-1.5 md:grid-cols-2">
+              {topCF.factors.map((f) => <FactorBar key={f.factor} factor={f} />)}
+            </div>
+          )}
+          {topCF.analysis_note && <div className="mt-2 text-[10px] text-amber-300/80">⚠ {topCF.analysis_note}</div>}
+          <div className="mt-2 text-[10px] italic text-slate-500">{topCF.disclaimer}</div>
+        </Panel>
+      )}
+
       <Panel title="Production trend — FPY % and throughput per 50-vehicle bucket (from twin history)">
         <div className="h-56">
           <ResponsiveContainer>
@@ -91,6 +125,39 @@ export default function Manager() {
           </ResponsiveContainer>
         </div>
         <div className="mt-1 text-[10px] text-slate-500">Each bucket = {trends?.bucket_size ?? 50} consecutive completions; dips align with maintenance windows, batch surges and shift ramps.</div>
+      </Panel>
+
+      <Panel title="🛑 Defect traceback & propagation (Innovation 4)"
+             right={<span className="text-[10px] uppercase tracking-widest text-slate-500">suspected origins · potential exposure</span>}>
+        <div className="grid gap-1.5 md:grid-cols-2">
+          {(defects?.defects ?? []).map((d) => (
+            <div key={d.id} className="flex items-center justify-between gap-2 rounded border border-slate-800 bg-slate-900/50 px-2 py-1.5 text-xs">
+              <div className="min-w-0">
+                <span className="font-mono text-cyan-300">{d.vin}</span>{' '}
+                <span className="text-slate-300">defect at {d.station}</span>
+                <span className="ml-2 font-mono text-[10px] text-slate-500">{simClock(d.t)}</span>
+              </div>
+              <button onClick={() => setTraceId(d.id)}
+                      className={`shrink-0 rounded-md px-2 py-1 text-[11px] transition ${traceId === d.id ? 'bg-cyan-800/70 text-white' : 'border border-red-700/60 bg-red-950/40 text-red-200 hover:bg-red-900/50'}`}>
+                {traceId === d.id ? 'OPEN' : 'TRACE DEFECT'}
+              </button>
+            </div>
+          ))}
+        </div>
+        {trace && (
+          <div className="mt-2 rounded border border-slate-700/70 bg-slate-900/60 p-2.5">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-widest text-slate-400">Defect investigation · {trace.vehicle}</span>
+              <button onClick={() => setTraceId(null)} className="text-[10px] text-slate-500 hover:text-slate-300">✕ close</button>
+            </div>
+            <DefectTracePanel trace={trace} />
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="🧠 AI Prediction Trust — validated outcomes, false alarms, controlled deployment (Innovation 5)"
+             right={<span className="text-[10px] uppercase tracking-widest text-slate-500">calculated, not assumed</span>}>
+        <PredictionTrustPanel />
       </Panel>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -125,7 +192,8 @@ export default function Manager() {
           ) : <div className="text-xs text-slate-500">no model trained yet — run scripts/train_models.py</div>}
         </Panel>
 
-        <Panel title="Station observability (coverage → analytics confidence)">
+        <Panel title="Station observability (coverage → analytics confidence)"
+               right={<ObsAdvisorSummary data={obs} />}>
           <div className="max-h-64 overflow-y-auto pr-1">
             <table className="w-full text-xs font-mono">
               <thead className="sticky top-0 bg-slate-900 text-left text-slate-500">
@@ -152,6 +220,29 @@ export default function Manager() {
           </div>
         </Panel>
       </div>
+
+      <Panel title="🧪 Safe change validation — shadow simulation (Innovation 3)"
+             right={<span className="text-[10px] uppercase tracking-widest text-slate-500">estimate, never auto-applied</span>}>
+        <div className="grid gap-3 md:grid-cols-[1fr_300px]">
+          <ShadowSimLab />
+          <div className="space-y-3">
+            <div>
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Maintenance queue</div>
+              <MaintenanceQueuePanel items={queueItems} windowStart={win?.next_window_start} />
+            </div>
+            <div>
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Simulation history</div>
+              <SimHistory onOpen={() => {}} />
+            </div>
+          </div>
+        </div>
+      </Panel>
     </div>
   )
+}
+
+/** tiny adapter so the queue panel is driven by the shared hook */
+function useQueueItems() {
+  const { data } = useMaintenanceQueue()
+  return data?.items ?? []
 }

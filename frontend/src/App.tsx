@@ -51,7 +51,7 @@ export default function App() {
         )}
         {persona === 'supervisor' && <Supervisor onSelectStation={setStationId} onSelectVehicle={setVehicleId} />}
         {persona === 'manager' && <Manager />}
-        {persona === 'leadership' && <Leadership />}
+        {persona === 'leadership' && <Leadership onSelectStation={setStationId} />}
       </main>
 
       <footer className="border-t border-slate-800/60 px-5 py-2 text-center text-[10px] text-slate-600">

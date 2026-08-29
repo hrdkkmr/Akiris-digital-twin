@@ -1,9 +1,13 @@
 import React from 'react'
-import { useStationDetail } from './api'
-import { ConfidenceTag, Meter, Panel, simClock } from './components'
+import { useObservabilityAdvisor, useStationDetail, useStationFactors } from './api'
+import { ConfidenceTag, Meter, ObsActionTag, ObsLevelTag, Panel, PriorityTag, simClock } from './components'
+import { StationCFAnalysis } from './CFAnalysis'
 
 export function StationDrawer({ stationId, onClose }: { stationId: number; onClose: () => void }) {
   const { data, isLoading } = useStationDetail(stationId)
+  const { data: obs } = useObservabilityAdvisor()
+  const advisor = obs?.stations.find((s) => s.station_id === stationId)
+  const { data: cf, isLoading: cfLoading, isError: cfError } = useStationFactors(stationId)
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/50" onClick={onClose}>
       <div className="h-full w-full max-w-xl overflow-y-auto border-l border-slate-700 bg-slate-950 p-5"
@@ -76,6 +80,33 @@ export function StationDrawer({ stationId, onClose }: { stationId: number; onClo
               </Panel>
             )}
 
+            {advisor && (
+              <Panel title="Observability advisor (Innovation 1)"
+                     right={<PriorityTag priority={advisor.priority} />}>
+                <div className="flex items-center gap-2 text-xs">
+                  <ObsLevelTag level={advisor.observability_level} />
+                  <span className="text-slate-400">{advisor.identified_gap}</span>
+                  {advisor.is_bottleneck && <span className="rounded bg-red-600/30 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-red-200">bottleneck</span>}
+                </div>
+                <div className="mt-2 text-[11px] text-slate-400">{advisor.rationale}</div>
+                {advisor.recommendations.length > 0 && (
+                  <ul className="mt-2 space-y-1.5">
+                    {advisor.recommendations.map((r, i) => (
+                      <li key={i} className="flex items-start gap-2 rounded border border-slate-800 bg-slate-950/60 px-2 py-1.5 text-[11px]">
+                        <ObsActionTag action={r.action_type} />
+                        <span className="text-slate-200">{r.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {advisor.projected_confidence !== null && advisor.projected_confidence !== undefined && (
+                  <div className="mt-2 rounded border border-violet-800/50 bg-violet-950/30 px-2 py-1.5 font-mono text-[11px] text-violet-200">
+                    projected confidence (estimated): {(advisor.confidence * 100).toFixed(0)}% → ~{(advisor.projected_confidence * 100).toFixed(0)}%
+                  </div>
+                )}
+              </Panel>
+            )}
+
             {data.recommendations.length > 0 && (
               <Panel title="Advisory recommendations">
                 <ul className="space-y-2">
@@ -92,6 +123,13 @@ export function StationDrawer({ stationId, onClose }: { stationId: number; onClo
                 </ul>
               </Panel>
             )}
+
+            <Panel title="🔍 Contributing-factor analysis (Innovation 2)"
+                   right={<span className="animate-pulse text-[10px] text-slate-500">{cfLoading ? 'analyzing…' : cf?.factors.length ? `${cf.factors.length} factors` : ''}</span>}>
+              {cfLoading && <div className="text-xs text-slate-400">correlating equipment, process, batch, shift & environment evidence…</div>}
+              {cfError && <div className="text-xs text-red-300">analysis unavailable — {String((cfError as unknown as Error)?.message ?? cfError)}</div>}
+              {cf && <StationCFAnalysis data={cf} />}
+            </Panel>
 
             <Panel title="Recent vehicles through this station">
               <table className="w-full text-xs font-mono">

@@ -1,6 +1,10 @@
 import React, { useState } from 'react'
-import { useAnomalies, useBottlenecks, useDefectRisks, useInjectionKinds, useInject, useMlRefresh, useRecommendations, useStations } from '../api'
+import { useAnomalies, useBottlenecks, useDefectRisks, useInjectionKinds, useInject, useMlRefresh, useObservabilityAdvisor, useRecommendations, useStations } from '../api'
 import { ConfidenceTag, KpiCard, Panel, StationTile, ZoneLabel, simClock } from '../components'
+import { MaintenanceCountdown, ShadowSimLab } from '../ShadowSim'
+import { DefectTracePanel } from '../DefectTraceback'
+import { PredictionTrustPanel } from '../PredictionTrust'
+import { useDefectTrace, useDefects, useShadowWindows } from '../api'
 
 /** SCENARIO INJECTION — continue the live twin with a disruption (demo/drill layer). */
 function InjectionPanel() {
@@ -90,6 +94,13 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
   const { data: risks } = useDefectRisks(0.4)
   const { data: recs } = useRecommendations()
   const { data: anomalies } = useAnomalies()
+  const { data: obs } = useObservabilityAdvisor()
+  const { data: win } = useShadowWindows()
+  const { data: defects } = useDefects(10)
+  const [traceId, setTraceId] = useState<number | null>(null)
+  const [showTrust, setShowTrust] = useState(false)
+  const { data: trace } = useDefectTrace(traceId)
+  const codeToId = Object.fromEntries((board?.stations ?? []).map((s) => [s.code, s.id]))
 
   const zones = ['body', 'paint', 'final']
   const stations = board?.stations ?? []
@@ -101,13 +112,20 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
     ...(recs?.recommendations.slice(0, 6).map((r) => ({
       t: r.confidence, text: r.issue, sev: r.severity,
     })) ?? []),
-  ].slice(0, 10)
+    ...(obs?.stations
+      .filter((s) => s.observability_level === 'CRITICAL_GAP' || s.priority === 'CRITICAL')
+      .slice(0, 3).map((s) => ({
+        t: s.confidence,
+        text: `${s.code} — ${s.identified_gap} (coverage ${(s.coverage * 100).toFixed(0)}%, conf ${(s.confidence * 100).toFixed(0)}%)`,
+        sev: 'high',
+      })) ?? []),
+  ].slice(0, 12)
 
   return (
     <div className="space-y-4">
       {/* bottleneck banner — the one thing a supervisor must see instantly */}
       {bn?.top && (
-        <div className="flex items-center justify-between rounded-lg border border-red-700/60 bg-red-950/40 px-4 py-3">
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-700/60 bg-red-950/40 px-4 py-3">
           <div className="flex items-center gap-3">
             <span className="text-lg">⚠</span>
             <div>
@@ -118,7 +136,14 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
               <div className="text-xs text-red-300/70">{bn.method_note}</div>
             </div>
           </div>
-          <ConfidenceTag confidence={bn.top.confidence} />
+          <div className="flex items-center gap-3">
+            <ConfidenceTag confidence={bn.top.confidence} />
+            <button onClick={() => onSelectStation(bn.top!.station_id)}
+                    className="rounded-md border border-cyan-700/60 bg-cyan-950/40 px-3 py-1.5 text-xs text-cyan-200 transition hover:bg-cyan-900/50"
+                    title="Open contributing-factor analysis for the bottleneck station">
+              🔍 Investigate
+            </button>
+          </div>
         </div>
       )}
 
@@ -130,6 +155,75 @@ export default function Supervisor({ onSelectStation, onSelectVehicle }: { onSel
         <KpiCard label="Critical" value={String(stations.filter((s) => s.status === 'critical').length)} tone="text-red-300" />
         <KpiCard label="At-risk vehicles" value={String(risks?.count ?? 0)} tone="text-amber-300" sub="predicted pre-final-assembly" />
       </div>
+
+      <Panel title="🛡 Safe change validation — maintenance window (Innovation 3)"
+             right={<span className="text-[10px] uppercase tracking-widest text-slate-500">shadow mode · live line untouched</span>}>
+        <div className="grid gap-3 md:grid-cols-[260px_1fr]">
+          <MaintenanceCountdown win={win} />
+          <div className="rounded border border-slate-800 bg-slate-900/50 p-2.5 text-[11px] text-slate-400">
+            <div className="mb-1 font-semibold text-slate-200">Before anything touches the line, validate it in the shadow twin.</div>
+            Any proposed change (cycle time, tool, buffer, sensors) is simulated on an isolated copy of current
+            state, compared against the live line, and only queued for the next maintenance window after human
+            review. Nothing is applied automatically.
+          </div>
+        </div>
+        <div className="mt-3"><ShadowSimLab compact /></div>
+      </Panel>
+
+      <Panel title="🛑 Detected defects — trace back & containment (Innovation 4)"
+             right={<span className="text-[10px] uppercase tracking-widest text-slate-500">suspected origin, not root cause</span>}>
+        {defects?.defects.length === 0 && <div className="text-xs text-slate-500">No detected defects in the current window.</div>}
+        <div className="grid gap-1.5 md:grid-cols-2">
+          {(defects?.defects ?? []).map((d) => (
+            <div key={d.id} className="flex items-center justify-between gap-2 rounded border border-slate-800 bg-slate-900/50 px-2 py-1.5 text-xs">
+              <div className="min-w-0">
+                <span className="font-mono text-cyan-300">{d.vin}</span>{' '}
+                <span className="text-slate-300">defect at {d.station}</span>
+                <span className="ml-2 font-mono text-[10px] text-slate-500">{simClock(d.t)}</span>
+              </div>
+              <button onClick={() => setTraceId(d.id)}
+                      className="shrink-0 rounded-md border border-red-700/60 bg-red-950/40 px-2 py-1 text-[11px] text-red-200 transition hover:bg-red-900/50">
+                TRACE DEFECT
+              </button>
+            </div>
+          ))}
+        </div>
+        {traceId && (
+          <div className="mt-2">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-widest text-slate-500">Defect investigation</span>
+              <button onClick={() => setTraceId(null)} className="text-[10px] text-slate-500 hover:text-slate-300">✕ close</button>
+            </div>
+            {trace && <DefectTracePanel trace={trace} onSelectVehicle={onSelectVehicle} onSelectStation={onSelectStation} />}
+            {!trace && <div className="text-xs text-slate-400">tracing…</div>}
+          </div>
+        )}
+      </Panel>
+
+      <Panel title={showTrust ? '🧠 AI Prediction Trust (Innovation 5)' : 'Defect-risk predictions — 🧠 Prediction Trust'}
+             right={!showTrust && (
+               <button onClick={() => setShowTrust(true)}
+                       className="rounded-md border border-cyan-700/60 bg-cyan-950/40 px-2.5 py-1 text-[11px] text-cyan-200 transition hover:bg-cyan-900/50">
+                 🧠 Prediction Trust
+               </button>
+             )}>
+        {showTrust ? (
+          <>
+            <PredictionTrustPanel
+              onOpenStation={(code) => codeToId[code] && onSelectStation(codeToId[code])}
+              onInvestigateFalseAlarms={(code) => codeToId[code] && onSelectStation(codeToId[code])} />
+            <div className="mt-2 text-right">
+              <button onClick={() => setShowTrust(false)} className="text-[10px] text-slate-500 hover:text-slate-300">✕ close</button>
+            </div>
+          </>
+        ) : (
+          <div className="rounded border border-slate-800 bg-slate-900/50 p-3 text-xs text-slate-400">
+            Every defect-risk prediction is validated against the actual inspection outcome —
+            true positives, false alarms, station-level reliability and a controlled
+            path to improve the model. <span className="text-slate-300">Open the panel to see where the AI is trustworthy — and where it isn't.</span>
+          </div>
+        )}
+      </Panel>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <Panel title="Line board — click a station for detail">
