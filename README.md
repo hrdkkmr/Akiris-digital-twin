@@ -1,4 +1,4 @@
-# TwinLine — Brownfield-Aware Digital Twin for Vehicle Assembly
+# AkiRis — Brownfield-Aware Digital Twin for Vehicle Assembly
 
 **Accenture Innovation Challenge 2026 · Round 2 · Track 4 (DigitalTwin.ai)**
 
@@ -32,12 +32,18 @@ conditions, on realistic (simulated) production data.
 | Different stakeholders | one twin state → three decision layers (Supervisor/Manager/Leadership tabs) |
 | Scale beyond one line | twin core vs site config split (`configs/*.yaml`); station archetypes, zero hard-coded stations |
 | Trust + validation | `predictions` resolve against actual outcomes; live precision/recall/FPR/FNR endpoint; confidence + completeness on every prediction |
+| Poor observability / incomplete evidence | station-level observability advisor, coverage/completeness/freshness signals, evidence-aware analytics confidence and recommended instrumentation gaps |
 
 ## 3. Solution overview
 Synthetic-but-calibrated factory (SimPy) → normalized event stream → ingestion
 pipeline (stateful, bulk) → relational twin state (PostgreSQL/SQLite) → services
 (bottleneck, genealogy, data-quality, recommendations, ROI) → ML (RandomForest
 defect risk, IsolationForest anomalies) → FastAPI → React/TS dashboards.
+
+The product experience is organized as **OBSERVE → ANALYZE → PREDICT → RECOMMEND**:
+station observability and evidence first, then bottleneck/defect analysis,
+vehicle-level prediction and genealogy, followed by advisory actions and safe
+shadow validation.
 
 ## 4. Architecture
 ```
@@ -56,6 +62,7 @@ ml/       (features → defect_model · anomaly · registry)
         ▼
 FastAPI routers (meta/fleet/analytics/production/ops)  →  React frontend (3 personas)
 ```
+
 Modular monolith by design (no premature microservices). Every boundary is an
 interface; swap-in points are explicit (see §20).
 
@@ -77,6 +84,7 @@ relationship — the UI journey is a query, not hard-coded text.
 `backend/app/simulation/` — discrete-event line: 42 stations across body/paint/
 final, 11 archetypes, per-station buffers, parallel capacity where realistic,
 scheduled tool-wear maintenance, shift learning curves, diurnal environment.
+
 **Four causal defect mechanisms** (tool degradation, supplier batch, operator
 shift, paint environment) create *correlated* quality loss carried per vehicle
 (`quality` accumulates; latent defect surfaces at inspections). Ground-truth
@@ -90,10 +98,11 @@ rates, operator variability, degradation rate, batch failure rate, environment.
 effective availability (configurable assumptions, not industry claims).
 Same engine, same DB, same models. The experiment has been run and the
 measured comparison (databases included under `data/generated/`) is in
-[`docs/scenario_report.md`](docs/scenario_report.md). Headline: **analytics
-confidence collapses 0.99 → 0.67 → 0.42 as coverage drops** — which is
-exactly why the twin reports its observability per station instead of
-pretending uniform knowledge.
+[`docs/scenario_report.md`](docs/scenario_report.md).
+
+Headline: **analytics confidence collapses 0.99 → 0.67 → 0.42 as coverage
+drops** — which is exactly why the twin reports its observability per station
+instead of pretending uniform knowledge.
 
 ## 9. Public dataset compatibility
 Schemas are adapter-friendly: Bosch Production Line / UCI SECOM / MIMII records
@@ -110,18 +119,21 @@ with severe class imbalance, station-coded features à la Bosch `L*_S*`).
   — all time-safe `merge_asof` features). Current main model: v1.6,
   ROC-AUC 0.598, recall 0.80 at an alert-load-capped threshold; the anomaly
   pass runs *before* defect training so event anomaly scores are available
-  as MES-visible features in both train and score time. Leakage-safe: prediction at end-of-paint
-  uses only earlier information; label = failure at *later* final-zone
-  inspections. Time-ordered 70/30 split (no shuffling); decision threshold
-  tuned on inner-validation with alert-load constraint; metrics include
-  precision/recall/F1/FPR/FNR/PR-AUC + confusion; artifacts versioned in
-  `model_versions`.
+  as MES-visible features in both train and score time. Leakage-safe: prediction
+  at end-of-paint uses only earlier information; label = failure at *later*
+  final-zone inspections. Time-ordered 70/30 split (no shuffling); decision
+  threshold tuned on inner-validation with alert-load constraint; metrics
+  include precision/recall/F1/FPR/FNR/PR-AUC + confusion; artifacts versioned
+  in `model_versions`.
 - **Anomalies** (`ml/anomaly.py`): IsolationForest per sensor-profile, robust
   z-features, train-quantile thresholds (alert-fatigue control), written back
   onto `vehicle_events.anomaly_score`.
 - Predictions store probability + **confidence** (completeness- and
   margin-aware) + **data_completeness** + model version; resolved later
   against outcomes (the trust loop).
+- The UI exposes prediction history, model version/trust signals, station-level
+  confidence and false-alarm/outcome monitoring so operators can distinguish
+  model degradation from genuinely higher production risk.
 
 ## 11. Missing-data strategy
 Four distinguished situations, preserved as metadata: random missing
@@ -131,10 +143,20 @@ Nothing is silently imputed at rest; ML imputation medians travel with the
 model artifact. Extension points reserved for soft sensors and
 value-of-information instrumentation ranking.
 
+The **Observability Advisor** turns this into an actionable view: it identifies
+stations with low coverage/completeness/freshness, explains why analytics
+confidence is reduced, and points to where additional instrumentation would
+most improve decision quality.
+
 ## 12. Bottleneck detection
 V1 evidence composite: 0.40·utilization + 0.25·max-queue + 0.20·|cycle-dev| +
 0.15·downtime (max-normalized), status bands, sample-based confidence.
 Verified by test: engineered saturated S17 always recovered top-1.
+
+The dashboard supports both historical and recent-window bottleneck evidence,
+so a temporary disruption can be separated from the line's persistent
+constraint.
+
 Extension points documented: WIP-queue & low-demand utilization methods with
 bottleneck-degree ranking (Kawabata et al. 2022); throughput-sensitivity
 ground truth (IEEE CASE 2024 "Bottleneck Mining").
@@ -147,18 +169,32 @@ contribution share, always labeled *"likely contributing factor"* with an
 explicit "correlation ≠ causation" caveat. Judge mode (`?truth=true`) reveals
 simulator ground truth for side-by-side comparison.
 
+The UI presents an evidence-oriented view of the affected unit, its upstream
+exposures and the common factors shared with other affected vehicles. This
+supports defect propagation/genealogy analysis without claiming unsupported
+causality.
+
 ## 14. Recommendations
 Advisory rule engine: bottleneck rebalancing (maintenance window), tool-wear
 service, torque calibration, batch quarantine, data-gap confidence notices,
 manual-process review — each with issue/evidence/action/severity/confidence,
 status `advisory`.
 
+Recommendations include containment-oriented actions where appropriate and
+surface the evidence, severity and confidence behind the recommendation.
+The safe-change workflow keeps proposed changes in **shadow mode** and queues
+approved actions for a maintenance window; nothing is applied automatically
+to the live line.
+
 ## 15. Stakeholder views
 One backend → three tabs: **Supervisor** (bottleneck banner, line board, alert
-feed, at-risk vehicles), **Manager** (throughput/FPY/lead time, bottleneck
-ranking chart, defect-zone mix, model trust, observability table),
-**Leadership** (annualized costs, ROI scenario grid, assumptions panel,
-advisory actions, rollout rationale). No separate fake data pipelines.
+feed, at-risk vehicles, scenario injection), **Manager** (throughput/FPY/lead
+time, bottleneck ranking chart, defect-zone mix, model trust, observability
+table, evidence/genealogy views), **Leadership** (annualized costs, ROI
+scenario grid, assumptions panel, advisory actions, rollout rationale).
+
+The three views are different decision layers over the **same twin state**.
+There are no separate fake data pipelines.
 
 ## 16. Integration strategy
 `DataSource` ABC + registry. Implemented: `SimulatorDataSource` (streams SimPy
@@ -181,7 +217,6 @@ scenario grid of *assumed* reductions (5/10/15/20%) — **never** as claims.
 All knobs in `.env` (see `.env.example`); disclaimer rendered in the UI.
 
 ## 19. How to run
-
 ### A. Local (fastest, sqlite zero-config)
 ```bash
 pip install -r backend/requirements.txt
@@ -196,6 +231,7 @@ cd frontend && npm install && npm run dev                                  # UI 
 docker compose up --build
 # backend seeds 1500 vehicles + trains on first boot (TWIN_SEED_VEHICLES)
 ```
+
 Frontend: http://localhost:5173 · API: http://localhost:8000/docs
 
 ### C. Scenario comparison
@@ -220,10 +256,11 @@ cd backend && alembic upgrade head     # schema migrations (create_all is only a
 TWIN_API_KEY=<secret> uvicorn app.main:app   # mutating ops endpoints now require X-API-Key
 TWIN_CORS_ORIGINS="https://twin.example.com" # tighten CORS per deployment
 TWIN_RATE_LIMIT_PER_MIN=120                  # per-IP mutation rate limit (GETs unaffected)
-pip audit-install: pip-audit -r backend/requirements.txt      # 0 known vulns (docs/security_audit.md)
+pip-audit -r backend/requirements.txt        # security audit
 locust -f load/locustfile.py --headless -u 60 -r 15 -t 60s --host http://localhost:8000
 docker compose --profile ops up              # + Prometheus (:9090) & Grafana (:3000)
 ```
+
 Health probe `/health` + readiness `/ready`; structured access logs carry
 `x-request-id`; **Prometheus `/metrics`** exposes HTTP counters/latency
 histograms + twin gauges (top-bottleneck score, at-risk vehicles, resolved
@@ -266,15 +303,18 @@ polling cycle. Defect-model retrain stays a deliberate button (POST
   first — SQLite sidecar files must not survive a swap).
 
 ## 20. Extension points (documented, intentionally NOT faked in V1)
-1. Soft sensors for uninstrumented stations  2. Conformal prediction /
-calibrated uncertainty (prediction ledger)  3. KPI-paper bottleneck methods +
-sensitivity-analysis ground truth + bottleneck-degree leaderboard  4. Temporal
-causal root-cause graph (Neo4j-ready genealogy)  5. Value-of-information
-sensor advisor (data_quality_metrics is the substrate)  6. Observability score
-as a business KPI  7. Transferable station archetypes / cross-plant transfer
-8. Shadow→Advisory→Controlled automation ladder  9. Real-time streaming
-(MQTT→Kafka/Flink documented production path)  10. Additional live injection knobs beyond the shipped four (sensor drift /
-sensor malfunction states; the injection service is the seam)
+1. Soft sensors for uninstrumented stations
+2. Conformal prediction / calibrated uncertainty (prediction ledger)
+3. KPI-paper bottleneck methods + sensitivity-analysis ground truth +
+   bottleneck-degree leaderboard
+4. Temporal causal root-cause graph (Neo4j-ready genealogy)
+5. Value-of-information sensor advisor (`data_quality_metrics` is the substrate)
+6. Observability score as a business KPI
+7. Transferable station archetypes / cross-plant transfer
+8. Shadow→Advisory→Controlled automation ladder
+9. Real-time streaming (MQTT→Kafka/Flink documented production path)
+10. Additional live injection knobs beyond the shipped four (sensor drift /
+    sensor malfunction states; the injection service is the seam)
 
 ## Assumptions
 Synthetic calibrated data stands in for proprietary plant data (explicitly
@@ -295,4 +335,5 @@ demo scenario; the API-key guard covers mutating ops endpoints only — full
 RBAC belongs with the eventual SSO/IAM integration, not a prototype.
 
 ---
+
 *Prototype · advisory only · no control authority over production equipment.*
