@@ -145,7 +145,6 @@ def bootstrap_demo_data():
 
 async def lifespan(app: FastAPI):
     init_db()  # dev convenience; production path: alembic upgrade head
-    bootstrap_demo_data()
     yield
 
 
