@@ -13,6 +13,9 @@ know" isn't trustworthy on a real floor.
 > predicts and recommends. It never writes to PLCs. Control-path automation is
 > a future phase, gated on validation and scheduled maintenance windows.
 
+Youtube Demo Video URL = https://youtu.be/nfyGfni0x58
+Live Demo URL = https://akiris-digital-twin.vercel.app/
+
 ---
 
 ## 1. Problem
