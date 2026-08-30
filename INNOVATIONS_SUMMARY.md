@@ -334,3 +334,98 @@ the parent directory.
 - Candidate revalidation re-tunes the decision threshold on validated outcomes — it is not a newly
   trained model artifact (clearly labeled in the UI).
 - Model deployment is a controlled simulated workflow (per spec: no real ML artifact is swapped).
+
+---
+
+# Feature — Configure Any Factory (Factory Setup)
+
+*Turn any factory into a real digital twin through the existing UI — no code,
+no hardcoded configs. Built on the existing Plant → ProductionLine → Station →
+Sensor architecture; nothing was rebuilt and nothing was removed.*
+
+**Flow:** Factory → Lines → Stations → Equipment → Sensors → Review → Create
+Digital Twin → Open Twin Dashboard.
+
+## What was added
+
+**Backend**
+- `services/factory_config.py` — the controlled configuration service:
+  - human-readable validation (factory/line/station ID rules, unique IDs,
+    ≥1 station per line, valid sensor types, no duplicate sensors);
+  - site-config YAML generation in the **exact existing format**
+    (`configs/automotive_line.yaml` shape: site/demand/shifts/environment/
+    mechanisms/injection/sensor_profiles/archetypes/stations), one YAML per
+    line under `configs/factories/{FACTORY_ID}/{LINE_ID}.yaml`;
+  - `provision_factory()` writes the real rows (Plant/ProductionLine/Station/
+    StationType/Sensor) via `IngestionPipeline.provision_topology()` —
+    topology only, **no production data fabricated**;
+  - `list_factories` / `factory_detail` (per-station data-quality coverage) /
+    `activate_factory` / `active_context` / `simulate_factory` (explicit,
+    labeled simulation that reuses the existing simulator + analytics refresh);
+  - observability **computed** from configured sensors: engine telemetry
+    (torque/vibration/temperature/motor_current → real Sensor rows) ÷ 4
+    (`FULL_SENSOR_REFERENCE`), buckets high ≥0.75 / medium ≥0.5 / low >0 /
+    none — never an arbitrary user-entered score. `cycle_time`/`throughput`/
+    `quality` are event-derived and create no Sensor row.
+  - sensor-poor / manual-only stations stay in the twin with "Limited
+    instrumentation" warnings.
+- `api/routes_factory.py` — `GET/POST /factories`, `GET /factories/active`,
+  `GET /factories/{id}`, `POST /factories/{id}/activate`,
+  `POST /factories/{id}/simulate` (mutation guard = existing API-key dep).
+- Factory selector context: new `TwinContext(id=1).active_line_id` singleton;
+  `deps.get_line_or_404(db, None)` follows it (explicit `?line_id=` still
+  wins) — **every existing analytics endpoint switches factories with zero
+  API-shape changes**.
+- Multi-factory correctness fixes: `production_summary` is now line-scoped
+  (fpy/throughput null on empty lines instead of misleading 1.0), and the
+  data feeds `/anomalies`, `/defect-risks`, `/predictions`, `/recommendations`,
+  `/vehicles`, `/inspections` are line-scoped via the selector; `Recommendation`
+  gained `line_id` (idempotent `ensure_schema` ALTER + backfill) and
+  `generate_recommendations(replace)` deletes per-line, not globally.
+- Models: `Plant.location/description`, `ProductionLine.description`,
+  `Station.name/equipment_generation/criticality`, `TwinContext`,
+  `Recommendation.line_id`.
+
+**Frontend**
+- `FactorySetup.tsx` — the wizard (all 8 steps), live computed coverage,
+  bulk station add, Duplicate/Edit/Delete, color legend, loading/saving/
+  success/error states, "Akiris - DigitalTwin.ai" branding, desktop-first.
+- `App.tsx` — header factory selector (active factory always visible, DATA /
+  SIM MODE badge), "⚙ Configure Factory" entry, and a "no historical data
+  connected / simulation mode available" banner with a labeled
+  "Generate simulation data" action for new factories (never fake data).
+- `api.ts` — module-level active-line selector; every data hook appends
+  `?line_id=` and its query key carries the line id, so switching the factory
+  refetches all views; new factory hooks/mutations.
+
+## How a configured factory reaches the existing twin
+1. Wizard POSTs the draft to `/factories`.
+2. Backend validates → writes the per-line site-config YAML → provisions
+   Plant/ProductionLine/Station/Sensor rows through the ingestion pipeline.
+3. The new line becomes `TwinContext.active_line_id`; `get_line_or_404(None)`
+   resolves it, so `/production/*`, `/stations`, `/bottlenecks`,
+   `/observability/advisor`, `/data-quality`, `/anomalies`, `/predictions`,
+   `/defect-risks`, `/recommendations`, `/vehicles`, `/inspections`, shadow
+   and prediction-trust endpoints all serve the new factory.
+4. No history exists yet → `has_data=false` → the UI shows the simulation-mode
+   banner. "Generate simulation data" runs the existing simulator and is
+   **clearly labeled as simulated**.
+
+## Tests & build
+- `python -m pytest tests/ -q` → **24 passed** (18 pre-existing untouched
+  + 6 new `tests/test_factory_setup.py` covering validation, provisioning,
+  coverage, selector switching, labeled simulation, and the API surface).
+- `npm run build` (tsc + vite) → passes.
+
+## Limitations (honest)
+- Factory configs are created through the UI/API; there is no bulk-import file
+  upload (a list of station IDs can be pasted for bulk station creation).
+- Equipment generation/criticality are stored and displayed but do not yet
+  alter simulation behavior (they are metadata for planning; the simulator's
+  wear/risk model is unchanged).
+- Simulation data for a new factory is bounded by the shared simulator
+  settings (max simulated seconds); the count reflects that run, not real
+  history, and is labeled accordingly everywhere.
+- The factory selector is per-browser-session on the backend context; the
+  active line is persisted in the DB (`twin_context`), so a restart keeps the
+  last selection.

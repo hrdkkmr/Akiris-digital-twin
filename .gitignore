@@ -8,3 +8,4 @@ data/generated/*.db
 data/generated/*.db-*
 data/models/
 .pytest_cache/
+configs/factories/

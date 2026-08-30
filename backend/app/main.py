@@ -21,20 +21,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .api import routes_analytics, routes_fleet, routes_meta, routes_ops, routes_production
+from .api import (routes_analytics, routes_factory, routes_fleet, routes_meta,
+                  routes_ops, routes_production)
 from .api.deps import get_db, get_line_or_404
 from .core import metrics as prom
 from .core.config import get_settings
 from .core.rate_limit import RateLimitMiddleware
 from .db.session import SessionLocal, init_db
-from sqlalchemy.orm import Session
-from .ingestion.pipeline import IngestionPipeline
-from .ingestion.simulator_source import SimulatorDataSource
-from .models import ProductionLine
-from .ml import anomaly as anomaly_service
-from .ml import defect_model
-from .services import data_quality as dq_service
-from .services import recommendations as rec_service
 
 __version__ = "0.3.0"
 
@@ -47,102 +40,6 @@ access_log = logging.getLogger("twinline.access")
 
 
 @asynccontextmanager
-def bootstrap_demo_data():
-    """
-    Automatically initialize the demo digital-twin database when
-    the deployment starts with an empty database.
-
-    This is intended for the hackathon/demo deployment.
-    """
-
-    db = SessionLocal()
-
-    try:
-        # Check whether data already exists
-        line = db.query(ProductionLine).first()
-
-        if line:
-            access_log.info(
-                "Database already initialized. Production line id=%s",
-                line.id,
-            )
-            return
-
-        access_log.info(
-            "No production line found. Generating demo dataset..."
-        )
-
-        # Generate simulated production data
-        source = SimulatorDataSource(
-            settings.site_config,
-            scenario="mixed",
-            seed=settings.default_seed,
-            vehicles=settings.default_vehicles,
-            max_seconds=settings.max_sim_seconds,
-        )
-
-        summary = IngestionPipeline(SessionLocal).ingest(source)
-
-        access_log.info(
-            "Demo data generated: spawned=%s completed=%s scrapped=%s",
-            summary.get("spawned"),
-            summary.get("completed"),
-            summary.get("scrapped"),
-        )
-
-        # Re-open session because ingestion may have committed/closed
-        db.close()
-        db = SessionLocal()
-
-        line = db.query(ProductionLine).first()
-
-        if not line:
-            raise RuntimeError(
-                "Demo data generation completed but no production line was created"
-            )
-
-        # Run the same ML/analytics pipeline as train_models.py
-        access_log.info("Training anomaly and defect models...")
-
-        anomaly_service.detect_anomalies(db, line.id)
-
-        defect_result = defect_model.train_defect_model(
-            db,
-            line.id,
-        )
-
-        if "error" not in defect_result:
-            defect_model.score_vehicles(
-                db,
-                line.id,
-            )
-
-        dq_service.compute_station_data_quality(
-            db,
-            line.id,
-            persist=True,
-        )
-
-        recommendations = rec_service.generate_recommendations(
-            db,
-            line.id,
-        )
-
-        db.commit()
-
-        access_log.info(
-            "Demo bootstrap completed successfully. line_id=%s",
-            line.id,
-        )
-
-    except Exception:
-        access_log.exception("Demo database bootstrap failed")
-        raise
-
-    finally:
-        db.close()
-
-
 async def lifespan(app: FastAPI):
     init_db()  # dev convenience; production path: alembic upgrade head
     yield
@@ -201,7 +98,7 @@ async def request_context(request: Request, call_next):
 
 
 for r in (routes_meta.router, routes_fleet.router, routes_analytics.router,
-          routes_production.router, routes_ops.router):
+          routes_production.router, routes_ops.router, routes_factory.router):
     app.include_router(r)
 
 

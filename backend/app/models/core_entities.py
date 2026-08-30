@@ -17,6 +17,8 @@ class Plant(Base):
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(128))
     industry: Mapped[str] = mapped_column(String(64), default="automotive")
+    location: Mapped[str | None] = mapped_column(String(128), nullable=True)   # factory city/site
+    description: Mapped[str | None] = mapped_column(String(256), nullable=True)
     lines: Mapped[list["ProductionLine"]] = relationship(back_populates="plant")
 
 
@@ -26,6 +28,7 @@ class ProductionLine(Base):
     plant_id: Mapped[int] = mapped_column(ForeignKey("plants.id"), index=True)
     code: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(String(256), nullable=True)
     takt_seconds: Mapped[float] = mapped_column(Float, default=45.0)
     scenario: Mapped[str] = mapped_column(String(32), default="mixed")
     config_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
@@ -49,13 +52,16 @@ class Station(Base):
     line_id: Mapped[int] = mapped_column(ForeignKey("production_lines.id"), index=True)
     seq: Mapped[int] = mapped_column(Integer)                    # process order 1..N
     code: Mapped[str] = mapped_column(String(16), index=True)    # S01…S42
+    name: Mapped[str | None] = mapped_column(String(128), nullable=True)   # human label (Factory Setup)
     zone: Mapped[str] = mapped_column(String(32), index=True)    # body/paint/final
     type_id: Mapped[int] = mapped_column(ForeignKey("station_types.id"), index=True)
-    sensor_profile: Mapped[str] = mapped_column(String(16))      # full/mid/sparse/manual
+    sensor_profile: Mapped[str] = mapped_column(String(16))      # full/mid/sparse/manual or custom
     capacity: Mapped[int] = mapped_column(Integer, default=1)
     has_tool: Mapped[bool] = mapped_column(Boolean, default=False)
     is_inspection: Mapped[bool] = mapped_column(Boolean, default=False)
     env_sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
+    equipment_generation: Mapped[str | None] = mapped_column(String(16), nullable=True)  # modern/mid/legacy
+    criticality: Mapped[str | None] = mapped_column(String(16), nullable=True)           # critical/high/normal/low
     baseline_cycle_mu: Mapped[float] = mapped_column(Float)
     baseline_cycle_sigma: Mapped[float] = mapped_column(Float)
     line: Mapped[ProductionLine] = relationship(back_populates="stations")
@@ -70,3 +76,13 @@ class Sensor(Base):
     name: Mapped[str] = mapped_column(String(32))
     unit: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(16), default="ok")  # ok/unavailable/malfunction
+
+
+class TwinContext(Base):
+    """Singleton row holding the currently ACTIVE production line — the factory
+    selector switches this; every analytics endpoint that resolves a line by
+    default (line_id=None) follows it. id is always 1."""
+    __tablename__ = "twin_context"
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    active_line_id: Mapped[int | None] = mapped_column(
+        ForeignKey("production_lines.id"), nullable=True)

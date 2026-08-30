@@ -7,7 +7,7 @@ from fastapi import Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..db.session import get_db  # noqa: F401  (re-export for routers)
-from ..models import ProductionLine, Station, Vehicle
+from ..models import ProductionLine, Station, TwinContext, Vehicle
 
 
 def require_api_key(request: Request,
@@ -28,10 +28,20 @@ def require_api_key(request: Request,
 
 
 def get_line_or_404(db: Session, line_id: int | None) -> ProductionLine:
-    if line_id is None:
-        line = db.query(ProductionLine).first()
-    else:
+    """Resolve the line an endpoint should read.
+
+    When ``line_id`` is given it wins (explicit). When it is None the
+    factory-selector context is honored (``TwinContext.active_line_id``) so the
+    whole dashboard follows the selected factory; falls back to the first line
+    for backward compatibility / fresh databases.
+    """
+    if line_id is not None:
         line = db.get(ProductionLine, line_id)
+    else:
+        ctx = db.get(TwinContext, 1)
+        line = db.get(ProductionLine, ctx.active_line_id) if ctx and ctx.active_line_id else None
+        if line is None:
+            line = db.query(ProductionLine).order_by(ProductionLine.id).first()
     if not line:
         raise HTTPException(404, "production line not found — run data generation first")
     return line

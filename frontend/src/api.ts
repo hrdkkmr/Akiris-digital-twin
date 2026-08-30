@@ -50,6 +50,27 @@ async function api<T>(path: string): Promise<T> {
   return apiFetch<T>(path)
 }
 
+// ===========================================================================
+// Active factory / line selector (Configure Any Factory).
+// The whole dashboard follows the selected factory: every data hook reads the
+// active line and appends ?line_id=, and query keys carry the line id so a
+// switch invalidates and refetches every view. Mirrors TwinContext on the
+// backend — explicit ?line_id= still wins there; here we always pass it.
+// ===========================================================================
+let activeLineId: number | null = null
+export const setActiveLineId = (id: number | null) => { activeLineId = id }
+export const getActiveLineId = () => activeLineId
+
+/** Append ?line_id=<active> to a path, preserving any existing query. */
+const withLine = (path: string): string => {
+  if (activeLineId == null) return path
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}line_id=${activeLineId}`
+}
+
+/** Append the active line id to a query key so a factory switch refetches. */
+const lineKey = (...parts: unknown[]) => [...parts, 'line', activeLineId]
+
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return apiFetch<T>(path, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -102,22 +123,22 @@ export type StationDetail = {
 // ---------- hooks ----------
 export const useStations = () => useQuery({ queryKey: ['stations'], queryFn: () => api<StationsResp>('/stations'), refetchInterval: 15_000 })
 export const useBottlenecks = (windowS?: number) =>
-  useQuery({ queryKey: ['bottlenecks', windowS ?? 'full'], queryFn: () => api<BNResp>(`/bottlenecks${windowS ? `?window_s=${windowS}` : ''}`), refetchInterval: 15_000 })
+  useQuery({ queryKey: lineKey('bottlenecks', windowS ?? 'full'), queryFn: () => api<BNResp>(withLine(`/bottlenecks${windowS ? `?window_s=${windowS}` : ''}`)), refetchInterval: 15_000 })
 export const useVehicles = (status?: string, limit = 60) =>
-  useQuery({ queryKey: ['vehicles', status, limit], queryFn: () => api<VehiclesResp>(`/vehicles?limit=${limit}${status ? `&status=${status}` : ''}`) })
+  useQuery({ queryKey: lineKey('vehicles', status, limit), queryFn: () => api<VehiclesResp>(withLine(`/vehicles?limit=${limit}${status ? `&status=${status}` : ''}`)) })
 export const useDefectRisks = (threshold = 0.4) =>
-  useQuery({ queryKey: ['defect-risks', threshold], queryFn: () => api<RiskResp>(`/defect-risks?threshold=${threshold}&limit=40`), refetchInterval: 20_000 })
+  useQuery({ queryKey: lineKey('defect-risks', threshold), queryFn: () => api<RiskResp>(withLine(`/defect-risks?threshold=${threshold}&limit=40`)), refetchInterval: 20_000 })
 export const useJourney = (id: number | null, truth = false) =>
   useQuery({ queryKey: ['journey', id, truth], queryFn: () => api<JourneyResp>(`/vehicles/${id}/journey?truth=${truth}`), enabled: id !== null })
 export const useFactors = (id: number | null) =>
   useQuery({ queryKey: ['factors', id], queryFn: () => api<FactorResp>(`/vehicles/${id}/contributing-factors`), enabled: id !== null })
-export const useAnomalies = () => useQuery({ queryKey: ['anomalies'], queryFn: () => api<{ anomalies: AnomalyRow[] }>('/anomalies?limit=30'), refetchInterval: 20_000 })
-export const useRecommendations = () => useQuery({ queryKey: ['recs'], queryFn: () => api<RecsResp>('/recommendations?limit=40'), refetchInterval: 20_000 })
-export const useSummary = () => useQuery({ queryKey: ['summary'], queryFn: () => api<Summary>('/production/summary'), refetchInterval: 15_000 })
-export const useROI = () => useQuery({ queryKey: ['roi'], queryFn: () => api<ROI>('/production/roi') })
+export const useAnomalies = () => useQuery({ queryKey: lineKey('anomalies'), queryFn: () => api<{ anomalies: AnomalyRow[] }>(withLine('/anomalies?limit=30')), refetchInterval: 20_000 })
+export const useRecommendations = () => useQuery({ queryKey: lineKey('recs'), queryFn: () => api<RecsResp>(withLine('/recommendations?limit=40')), refetchInterval: 20_000 })
+export const useSummary = () => useQuery({ queryKey: lineKey('summary'), queryFn: () => api<Summary>(withLine('/production/summary')), refetchInterval: 15_000 })
+export const useROI = () => useQuery({ queryKey: lineKey('roi'), queryFn: () => api<ROI>(withLine('/production/roi')) })
 export const useModelPerf = () => useQuery({ queryKey: ['modelperf'], queryFn: () => api<ModelPerf>('/model-performance'), refetchInterval: 30_000 })
-export const useDQ = () => useQuery({ queryKey: ['dq'], queryFn: () => api<DQResp>('/data-quality'), refetchInterval: 30_000 })
-export const useTrends = (bucket = 50) => useQuery({ queryKey: ['trends', bucket], queryFn: () => api<TrendResp>(`/production/trends?bucket_vehicles=${bucket}`), refetchInterval: 60_000 })
+export const useDQ = () => useQuery({ queryKey: lineKey('dq'), queryFn: () => api<DQResp>(withLine('/data-quality')), refetchInterval: 30_000 })
+export const useTrends = (bucket = 50) => useQuery({ queryKey: lineKey('trends', bucket), queryFn: () => api<TrendResp>(withLine(`/production/trends?bucket_vehicles=${bucket}`)), refetchInterval: 60_000 })
 export const useStationDetail = (id: number | null) =>
   useQuery({ queryKey: ['station', id], queryFn: () => api<StationDetail>(`/stations/${id}`), enabled: id !== null })
 
@@ -161,7 +182,7 @@ export type ObsRow = {
 }
 export type ObsResp = { generated_at: number; disclaimer: string; summary: Record<string, number>; stations: ObsRow[] }
 export const useObservabilityAdvisor = () =>
-  useQuery({ queryKey: ['obs-advisor'], queryFn: () => api<ObsResp>('/observability/advisor'), refetchInterval: 30_000 })
+  useQuery({ queryKey: lineKey('obs-advisor'), queryFn: () => api<ObsResp>(withLine('/observability/advisor')), refetchInterval: 30_000 })
 
 // ---------- Innovation 2 — Multi-causal contributing-factor analysis ----------
 export type CFFactor = { factor: string; label: string; score: number; strength: string; evidence: string[] }
@@ -184,7 +205,7 @@ export const useStationFactors = (stationId: number | null) =>
 export const useVehicleCF = (vehicleId: number | null) =>
   useQuery({ queryKey: ['cf-vehicle', vehicleId], queryFn: () => api<VehicleCFResp>(`/contributing-factors/vehicle/${vehicleId}`), enabled: vehicleId !== null, staleTime: 5 * 60_000 })
 export const usePatterns = () =>
-  useQuery({ queryKey: ['cf-patterns'], queryFn: () => api<{ patterns: CFPattern[] }>('/contributing-factors/patterns'), staleTime: 5 * 60_000 })
+  useQuery({ queryKey: lineKey('cf-patterns'), queryFn: () => api<{ patterns: CFPattern[] }>(withLine('/contributing-factors/patterns')), staleTime: 5 * 60_000 })
 
 // ---------- Innovation 3 — Safe change validation + shadow simulation ----------
 export type ShadowChange = {
@@ -213,13 +234,13 @@ const postJson = <T>(url: string, body: unknown) =>
   apiPost<T>(url, body)
 
 export const useShadowChanges = () =>
-  useQuery({ queryKey: ['shadow-changes'], queryFn: () => api<{ mode: string; count: number; changes: ShadowChange[] }>('/shadow/changes'), staleTime: 60_000 })
+  useQuery({ queryKey: lineKey('shadow-changes'), queryFn: () => api<{ mode: string; count: number; changes: ShadowChange[] }>(withLine('/shadow/changes')), staleTime: 60_000 })
 export const useShadowWindows = () =>
-  useQuery({ queryKey: ['shadow-windows'], queryFn: () => api<ShadowWindows>('/shadow/windows'), staleTime: 30_000, refetchInterval: 30_000 })
+  useQuery({ queryKey: lineKey('shadow-windows'), queryFn: () => api<ShadowWindows>(withLine('/shadow/windows')), staleTime: 30_000, refetchInterval: 30_000 })
 export const useSimHistory = () =>
-  useQuery({ queryKey: ['sim-history'], queryFn: () => api<{ count: number; scenarios: SimScenario[] }>('/shadow/scenarios'), staleTime: 15_000 })
+  useQuery({ queryKey: lineKey('sim-history'), queryFn: () => api<{ count: number; scenarios: SimScenario[] }>(withLine('/shadow/scenarios')), staleTime: 15_000 })
 export const useMaintenanceQueue = () =>
-  useQuery({ queryKey: ['maint-queue'], queryFn: () => api<{ count: number; items: QueueItem[] }>('/shadow/queue'), staleTime: 15_000 })
+  useQuery({ queryKey: lineKey('maint-queue'), queryFn: () => api<{ count: number; items: QueueItem[] }>(withLine('/shadow/queue')), staleTime: 15_000 })
 export const useScenarioDetail = (id: number | null) =>
   useQuery({ queryKey: ['sim-scenario', id], queryFn: () => api<SimScenario>(`/shadow/scenarios/${id}`), enabled: id !== null, staleTime: 0 })
 export const createScenario = (changes: ShadowChange[]) => postJson<SimScenario>('/shadow/scenarios', { changes })
@@ -243,7 +264,7 @@ export type DefectTrace = {
   data_confidence: string; traceability_note: string | null; caveat: string; disclaimer: string
 }
 export const useDefects = (limit = 12) =>
-  useQuery({ queryKey: ['defects', limit], queryFn: () => api<{ count: number; defects: DefectRow[] }>(`/defects?limit=${limit}`), staleTime: 30_000 })
+  useQuery({ queryKey: lineKey('defects', limit), queryFn: () => api<{ count: number; defects: DefectRow[] }>(withLine(`/defects?limit=${limit}`)), staleTime: 30_000 })
 export const useDefectTrace = (defectId: number | null) =>
   useQuery({ queryKey: ['defect-trace', defectId], queryFn: () => api<DefectTrace>(`/defects/${defectId}/trace`), enabled: defectId !== null, staleTime: 5 * 60_000 })
 
@@ -265,7 +286,7 @@ export type PredictionTrust = {
   }
 }
 export const usePredictionTrust = () =>
-  useQuery({ queryKey: ['pred-trust'], queryFn: () => api<PredictionTrust>('/predictions/trust'), staleTime: 15_000, refetchInterval: 60_000 })
+  useQuery({ queryKey: lineKey('pred-trust'), queryFn: () => api<PredictionTrust>(withLine('/predictions/trust')), staleTime: 15_000, refetchInterval: 60_000 })
 /** Revalidate the prediction system on validated outcomes → creates a
  * candidate prediction policy for human review (never touches production). */
 export const revalidateCandidate = () => postJson<Record<string, unknown>>('/predictions/trust/revalidate', {})
@@ -277,3 +298,80 @@ export const approveCandidate = (approve: boolean) => postJson<Record<string, un
 export const deployCandidate = (simulateWindow = false) => postJson<Record<string, unknown>>('/predictions/trust/deploy', { simulate_window: simulateWindow })
 export const useVehicleDefect = (vehicleId: number | null) =>
   useQuery({ queryKey: ['vehicle-defect', vehicleId], queryFn: () => api<{ count: number; defects: DefectRow[] }>(`/defects?vehicle_id=${vehicleId}&limit=1`), enabled: vehicleId !== null, staleTime: 30_000 })
+
+// ===========================================================================
+// Configure Any Factory — factory setup API (mirrors backend /factories).
+// ===========================================================================
+export type CoverageBuckets = { high: number; medium: number; low: number; none: number }
+export type FactoryLineSummary = {
+  id: number; code: string; name: string; description: string | null
+  stations: number; has_data: boolean
+  coverage: CoverageBuckets; equipment: Record<string, number>
+  manual_stations: number
+}
+export type FactorySummary = {
+  code: string; name: string; location: string | null; description: string | null
+  lines: FactoryLineSummary[]; is_active: boolean
+}
+export type FactoriesResp = { count: number; factories: FactorySummary[] }
+export type ActiveContext = {
+  factory_code: string; factory_name: string
+  line_id: number; line_code: string; line_name: string
+  has_data: boolean
+}
+export type StationDetailRow = {
+  id: number; code: string; name: string; archetype: string | null
+  equipment_type: string; zone: string; equipment_generation: string
+  criticality: string; sensors: string[]
+  manual_inspection: boolean; coverage: number; observability: string
+  analytics_confidence: number | null
+}
+export type FactoryDetailLine = {
+  id: number; code: string; name: string; description: string | null
+  stations: StationDetailRow[]
+  coverage: CoverageBuckets; manual_stations: number
+}
+export type FactoryDetail = {
+  factory: FactorySummary
+  lines: FactoryDetailLine[]
+  warnings: string[]
+}
+export type CreateFactoryResult = {
+  status: string; factory: FactorySummary; lines: { code: string; stations: number }[]
+  warnings: string[]; active_line_id: number | null
+}
+export type SimulateResult = {
+  status: string; simulated: boolean; line_id: number; scenario: string; seed: number
+  vehicles: number; ingested: { spawned: number; completed: number; scrapped: number; wall_seconds: number }
+  note: string
+}
+
+export const useFactories = () =>
+  useQuery({ queryKey: ['factories'], queryFn: () => api<FactoriesResp>('/factories'), staleTime: 15_000, refetchInterval: 60_000 })
+export const useActiveFactory = () =>
+  useQuery({ queryKey: ['factory-active'], queryFn: () => api<ActiveContext>('/factories/active'), staleTime: 10_000, refetchInterval: 30_000 })
+export const useFactoryDetail = (code: string | null) =>
+  useQuery({ queryKey: ['factory-detail', code], queryFn: () => api<FactoryDetail>(`/factories/${code}`), enabled: code !== null, staleTime: 15_000 })
+
+export const useCreateFactory = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: unknown) => apiPost<CreateFactoryResult>('/factories', payload),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['factories'] }) },
+  })
+}
+export const useActivateFactory = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (code: string) => apiPost<{ status: string; active: ActiveContext }>(`/factories/${code}/activate`, {}),
+    onSuccess: () => { void qc.invalidateQueries() },  // every view refetches for the new factory
+  })
+}
+export const useSimulateFactory = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { code: string; vehicles?: number; seed?: number }) =>
+      apiPost<SimulateResult>(`/factories/${vars.code}/simulate?vehicles=${vars.vehicles ?? 200}&seed=${vars.seed ?? 42}`, {}),
+    onSuccess: () => { void qc.invalidateQueries() },
+  })
+}

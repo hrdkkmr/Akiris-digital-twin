@@ -43,3 +43,18 @@ cd backend && python -m pytest tests/ -q
 - Innovation 3 — Shadow Simulation (Manager/Leadership): select changes -> Run shadow -> compare -> risk -> queue for maintenance window.
 - Innovation 4 — Defect Traceback (Supervisor): Detected defects -> TRACE DEFECT -> suspected origins -> exposed units -> containment.
 - Innovation 5 — Prediction Trust (any level): 🧠 Prediction Trust -> validated metrics -> false alarms -> Retrain -> Approve -> deploy via maintenance window.
+
+## 6. Configure Any Factory (Factory Setup)
+1. Header → **⚙ Configure Factory** → walk the wizard
+   (Factory → Lines → Stations → Equipment → Sensors → Review).
+2. **Create Digital Twin** → the backend validates, writes a site-config YAML
+   under `configs/factories/{FACTORY_ID}/{LINE_ID}.yaml` and provisions the
+   Plant/ProductionLine/Station/Sensor rows. The new factory becomes active.
+3. A new factory has **no historical data** → the dashboard shows the
+   simulation-mode banner; use **Generate simulation data (labeled)** to run
+   the simulator (always labeled as simulated, never presented as real
+   history). Switch factories at any time via the header selector; the demo
+   factory (Aurora Motors / PLANT_A) is untouched and switchable.
+4. Factory APIs: `GET /factories`, `POST /factories`,
+   `GET /factories/active`, `GET /factories/{id}`,
+   `POST /factories/{id}/activate`, `POST /factories/{id}/simulate`.

@@ -40,6 +40,8 @@ class Prediction(Base):
 class Recommendation(Base):
     __tablename__ = "recommendations"
     id: Mapped[int] = mapped_column(primary_key=True)
+    line_id: Mapped[int | None] = mapped_column(ForeignKey("production_lines.id"),
+                                                nullable=True, index=True)
     created_at: Mapped[float] = mapped_column(Float)
     scope: Mapped[str] = mapped_column(String(16))               # station/vehicle/batch/line
     ref_code: Mapped[str] = mapped_column(String(32), index=True)

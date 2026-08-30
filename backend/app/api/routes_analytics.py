@@ -84,10 +84,13 @@ def evidence_matrix_endpoint(station_ident: str,
 
 @router.get("/anomalies")
 def anomalies(severity: str | None = None, station: str | None = None,
-              limit: int = Query(100, le=1000), db: Session = Depends(get_db)):
+              line_id: int | None = None, limit: int = Query(100, le=1000),
+              db: Session = Depends(get_db)):
+    line = get_line_or_404(db, line_id)
     q = (db.query(Anomaly, Station.code, Vehicle.vin)
          .join(Station, Station.id == Anomaly.station_id)
          .outerjoin(Vehicle, Vehicle.id == Anomaly.vehicle_id)
+         .filter(Station.line_id == line.id)
          .order_by(Anomaly.t.desc()))
     if severity:
         q = q.filter(Anomaly.severity == severity)
@@ -102,13 +105,16 @@ def anomalies(severity: str | None = None, station: str | None = None,
 
 @router.get("/defect-risks")
 def defect_risks(threshold: float = Query(0.4, ge=0, le=1),
-                 limit: int = Query(50, le=500), db: Session = Depends(get_db)):
+                 line_id: int | None = None, limit: int = Query(50, le=500),
+                 db: Session = Depends(get_db)):
     """Vehicles with elevated predicted defect risk — the 'at-risk' board."""
+    line = get_line_or_404(db, line_id)
     latest = (db.query(Prediction.vehicle_id, func.max(Prediction.id)
                        .label("mid")).group_by(Prediction.vehicle_id).subquery())
     q = (db.query(Prediction, Vehicle)
          .join(latest, Prediction.id == latest.c.mid)
          .join(Vehicle, Vehicle.id == Prediction.vehicle_id)
+         .filter(Vehicle.line_id == line.id)
          .filter(Prediction.defect_probability >= threshold)
          .order_by(Prediction.defect_probability.desc()).limit(limit))
     out = []
@@ -125,8 +131,12 @@ def defect_risks(threshold: float = Query(0.4, ge=0, le=1),
 
 @router.get("/predictions")
 def predictions(vehicle_id: int | None = None, resolved_only: bool = False,
-                limit: int = Query(100, le=1000), db: Session = Depends(get_db)):
-    q = db.query(Prediction).order_by(Prediction.created_at.desc())
+                line_id: int | None = None, limit: int = Query(100, le=1000),
+                db: Session = Depends(get_db)):
+    line = get_line_or_404(db, line_id)
+    q = (db.query(Prediction).join(Vehicle, Vehicle.id == Prediction.vehicle_id)
+         .filter(Vehicle.line_id == line.id)
+         .order_by(Prediction.created_at.desc()))
     if vehicle_id:
         q = q.filter(Prediction.vehicle_id == vehicle_id)
     if resolved_only:
@@ -309,9 +319,12 @@ def prediction_deploy_view(payload: dict | None = None, line_id: int | None = No
 
 
 @router.get("/recommendations")
-def recommendations(severity: str | None = None, limit: int = Query(50, le=500),
+def recommendations(severity: str | None = None, line_id: int | None = None,
+                    limit: int = Query(50, le=500),
                     db: Session = Depends(get_db)):
-    q = db.query(Recommendation).order_by(Recommendation.id.desc())
+    line = get_line_or_404(db, line_id)
+    q = (db.query(Recommendation).filter(Recommendation.line_id == line.id)
+         .order_by(Recommendation.id.desc()))
     if severity:
         q = q.filter(Recommendation.severity == severity)
     rows = q.limit(limit).all()

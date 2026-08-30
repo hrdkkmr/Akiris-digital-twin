@@ -16,21 +16,27 @@ from .twin_state import last_sim_time
 
 def production_summary(db: Session, line_id: int) -> dict:
     now = last_sim_time(db)
-    v = db.query(Vehicle.status, func.count()).group_by(Vehicle.status).all()
+    v = (db.query(Vehicle.status, func.count())
+         .filter(Vehicle.line_id == line_id)
+         .group_by(Vehicle.status).all())
     by_status = dict(v)
     total = sum(by_status.values())
     completed = by_status.get("completed", 0)
     scrapped = by_status.get("scrapped", 0)
 
-    span = (db.query(func.max(Vehicle.completed_at)).scalar() or now) - \
-           (db.query(func.min(Vehicle.started_at)).scalar() or 0)
+    span = (db.query(func.max(Vehicle.completed_at))
+            .filter(Vehicle.line_id == line_id).scalar() or now) - \
+           (db.query(func.min(Vehicle.started_at))
+            .filter(Vehicle.line_id == line_id).scalar() or 0)
     span = max(span, 1.0)
 
     lead = (db.query(func.avg(Vehicle.completed_at - Vehicle.started_at))
-            .filter(Vehicle.status == "completed").scalar())
+            .filter(Vehicle.line_id == line_id,
+                    Vehicle.status == "completed").scalar())
 
     zone_defects = (db.query(Station.zone, func.count())
                     .join(Defect, Defect.station_id == Station.id)
+                    .filter(Station.line_id == line_id)
                     .group_by(Station.zone).all())
 
     # downtime from maintenance events
@@ -51,8 +57,8 @@ def production_summary(db: Session, line_id: int) -> dict:
         "completed": completed,
         "scrapped": scrapped,
         "wip": by_status.get("wip", 0),
-        "fpy": round(1 - scrapped / max(total, 1), 4),
-        "throughput_per_hour": round(completed / span * 3600, 1),
+        "fpy": round(1 - scrapped / max(total, 1), 4) if total else None,
+        "throughput_per_hour": round(completed / span * 3600, 1) if total else None,
         "avg_lead_time_s": round(lead, 1) if lead else None,
         "defects_by_zone_found": dict(zone_defects),
         "maintenance_downtime_min": round(sum(downtime.values()) / 60, 1),

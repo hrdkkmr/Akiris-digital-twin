@@ -15,9 +15,11 @@ router = APIRouter(tags=["fleet"])
 @router.get("/vehicles")
 def list_vehicles(status: str | None = None, variant: str | None = None,
                   min_risk: float | None = Query(None, ge=0, le=1),
+                  line_id: int | None = None,
                   limit: int = Query(50, ge=1, le=500), offset: int = 0,
                   db: Session = Depends(get_db)):
-    q = db.query(Vehicle).order_by(Vehicle.id.desc())
+    line = get_line_or_404(db, line_id)
+    q = db.query(Vehicle).filter(Vehicle.line_id == line.id).order_by(Vehicle.id.desc())
     if status:
         q = q.filter(Vehicle.status == status)
     if variant:
@@ -58,17 +60,24 @@ def contributing_factors(vehicle_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/inspections")
-def list_inspections(result: str | None = None, limit: int = Query(100, le=1000),
-                     offset: int = 0, db: Session = Depends(get_db)):
+def list_inspections(result: str | None = None, line_id: int | None = None,
+                     limit: int = Query(100, le=1000), offset: int = 0,
+                     db: Session = Depends(get_db)):
+    line = get_line_or_404(db, line_id)
     q = db.query(Inspection, Vehicle.vin, Station.code) \
           .join(Vehicle, Vehicle.id == Inspection.vehicle_id) \
           .join(Station, Station.id == Inspection.station_id) \
+          .filter(Station.line_id == line.id) \
           .order_by(Inspection.t.desc())
     if result:
         q = q.filter(Inspection.result == result)
     rows = q.offset(offset).limit(limit).all()
-    total = db.query(func.count(Inspection.id)).scalar()
-    fails = db.query(func.count(Inspection.id)).filter_by(result="fail").scalar()
+    total = db.query(func.count(Inspection.id)) \
+        .join(Station, Station.id == Inspection.station_id) \
+        .filter(Station.line_id == line.id).scalar()
+    fails = db.query(func.count(Inspection.id)) \
+        .join(Station, Station.id == Inspection.station_id) \
+        .filter(Station.line_id == line.id, Inspection.result == "fail").scalar()
     return {"total": total, "fail_count": fails,
             "inspections": [{"vin": vin, "station": code, "t": i.t, "result": i.result,
                              "defect_id": i.defect_id} for i, vin, code in rows]}

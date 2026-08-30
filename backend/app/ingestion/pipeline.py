@@ -33,19 +33,28 @@ class IngestionPipeline:
 
     # ---------------- topology ----------------
     def _upsert_topology(self, db: Session, cfg: dict,
-                         append: bool = False) -> tuple[Plant, ProductionLine, dict]:
-        plant = db.query(Plant).filter_by(code="PLANT_A").first()
+                         append: bool = False,
+                         plant_code: str = "PLANT_A",
+                         line_code: str = "LINE_A",
+                         line_name: str | None = None) -> tuple[Plant, ProductionLine, dict]:
+        plant = db.query(Plant).filter_by(code=plant_code).first()
         if not plant:
-            plant = Plant(code="PLANT_A", name=cfg["site"]["name"].split("—")[0].strip(),
-                          industry=cfg["site"].get("industry", "automotive"))
+            plant = Plant(code=plant_code, name=cfg["site"]["name"].split("—")[0].strip(),
+                          industry=cfg["site"].get("industry", "automotive"),
+                          location=cfg["site"].get("location"),
+                          description=cfg["site"].get("description"))
             db.add(plant)
             db.flush()
-        line = db.query(ProductionLine).filter_by(code="LINE_A").first()
+        line = (db.query(ProductionLine)
+                .filter_by(plant_id=plant.id, code=line_code).first())
         if not line:
             line = ProductionLine(
-                plant_id=plant.id, code="LINE_A", name=cfg["site"]["name"],
+                plant_id=plant.id, code=line_code,
+                name=line_name or cfg["site"]["name"],
+                description=cfg["site"].get("line_description"),
                 takt_seconds=cfg["demand"]["interarrival_sec"],
-                scenario=cfg["site"].get("scenario", "mixed"))
+                scenario=cfg["site"].get("scenario", "mixed"),
+                config_path=cfg.get("_config_path"))
             db.add(line)
             db.flush()
         if db.query(Station).filter_by(line_id=line.id).count():
@@ -66,17 +75,22 @@ class IngestionPipeline:
                         for e in cfg["stations"]]
         types: dict[str, StationType] = {}
         stations: dict[str, Station] = {}
-        for idx, s in enumerate(sim_stations, start=1):
+        for idx, (s, entry) in enumerate(zip(sim_stations, cfg["stations"]), start=1):
             st_type = types.get(s.archetype)
             if st_type is None:
-                st_type = StationType(code=s.archetype, sensors_expected=list(s.sensors))
-                db.add(st_type)
-                db.flush()
+                st_type = db.query(StationType).filter_by(code=s.archetype).first()
+                if st_type is None:
+                    st_type = StationType(code=s.archetype, sensors_expected=list(s.sensors))
+                    db.add(st_type)
+                    db.flush()
                 types[s.archetype] = st_type
             row = Station(line_id=line.id, seq=idx, code=s.id, zone=s.zone,
-                          type_id=st_type.id, sensor_profile=s.profile,
+                          name=entry.get("name"), type_id=st_type.id,
+                          sensor_profile=s.profile,
                           capacity=s.capacity, has_tool=bool(s.tool),
                           is_inspection=s.is_inspection, env_sensitive=s.env_sensitive,
+                          equipment_generation=entry.get("equipment_generation"),
+                          criticality=entry.get("criticality"),
                           baseline_cycle_mu=s.mu, baseline_cycle_sigma=s.sigma)
             db.add(row)
             db.flush()
@@ -87,12 +101,33 @@ class IngestionPipeline:
         db.commit()
         return plant, line, stations
 
+    def provision_topology(self, db: Session, cfg: dict,
+                           plant_code: str = "PLANT_A",
+                           line_code: str = "LINE_A",
+                           line_name: str | None = None,
+                           config_path: str | None = None) -> tuple[Plant, ProductionLine, dict]:
+        """Provision ONLY the topology (plant/line/stations/sensors) for a
+        factory configuration — no production data is generated. Used by the
+        Factory Setup workflow so a configured factory exists in the twin
+        immediately, with an explicit 'no historical data yet' state."""
+        if config_path:
+            cfg = {**cfg, "_config_path": config_path}
+        return self._upsert_topology(db, cfg, append=False,
+                                     plant_code=plant_code,
+                                     line_code=line_code,
+                                     line_name=line_name)
+
     # ---------------- consume ----------------
-    def ingest(self, source: DataSource, append: bool = False) -> dict[str, Any]:
+    def ingest(self, source: DataSource, append: bool = False,
+               plant_code: str = "PLANT_A", line_code: str = "LINE_A",
+               line_name: str | None = None) -> dict[str, Any]:
         cfg = source.get_site_config()
         t_start = time.time()
         db = self.sf()
-        plant, line, stations = self._upsert_topology(db, cfg, append=append)
+        plant, line, stations = self._upsert_topology(db, cfg, append=append,
+                                                      plant_code=plant_code,
+                                                      line_code=line_code,
+                                                      line_name=line_name)
         variant_factor = {v["id"]: v["factor"] for v in cfg["demand"]["product_variants"]}
         raw_stream = self.settings.raw_sensor_stream
 

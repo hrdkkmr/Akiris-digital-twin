@@ -96,6 +96,24 @@ def ensure_schema(eng):
         return {c["name"] for c in insp.get_columns(tbl)}
 
     with eng.begin() as conn:
+        # Factory Setup (configure-any-factory) — additive columns
+        for tbl, col, ddl in (
+            ("plants", "location", "VARCHAR(128)"),
+            ("plants", "description", "VARCHAR(256)"),
+            ("production_lines", "description", "VARCHAR(256)"),
+            ("stations", "name", "VARCHAR(128)"),
+            ("stations", "equipment_generation", "VARCHAR(16)"),
+            ("stations", "criticality", "VARCHAR(16)"),
+        ):
+            if tbl in insp.get_table_names() and col not in cols(tbl):
+                conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} {ddl}"))
+        # Factory Setup — per-line recommendations (multi-factory isolation).
+        # Existing rows (single-line era) are backfilled to the first line.
+        if "recommendations" in insp.get_table_names() and "line_id" not in cols("recommendations"):
+            conn.execute(text("ALTER TABLE recommendations ADD COLUMN line_id INTEGER"))
+            conn.execute(text(
+                "UPDATE recommendations SET line_id = "
+                "(SELECT MIN(id) FROM production_lines) WHERE line_id IS NULL"))
         # Innovation 5 — model lifecycle status on model_versions
         if "model_versions" in insp.get_table_names() and "status" not in cols("model_versions"):
             conn.execute(text("ALTER TABLE model_versions ADD COLUMN status VARCHAR(16) DEFAULT 'production'"))
