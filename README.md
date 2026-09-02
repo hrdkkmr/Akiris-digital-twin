@@ -1,4 +1,4 @@
-# AkiRis — Brownfield-Aware Digital Twin for Vehicle Assembly
+# Akiris — Brownfield-Aware Digital Twin for Vehicle Assembly
 
 **Accenture Innovation Challenge 2026 · Round 2 · Track 4 (DigitalTwin.ai)**
 
