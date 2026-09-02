@@ -18,6 +18,22 @@ Live Demo URL = https://akiris-digital-twin.vercel.app/
 
 ---
 
+## Quick Navigation
+
+| Section | Section | Section |
+|---|---|---|
+| [1. Problem](#1-problem) | [2. Real-world challenges addressed](#2-real-world-challenges-addressed) | [3. Solution overview](#3-solution-overview) |
+| [4. Architecture](#4-architecture) | [Dependencies](#dependencies) | [5. Digital Twin model](#5-digital-twin-model) |
+| [6. Data model](#6-data-model-18-tables) | [7. Synthetic data generation](#7-synthetic-data-generation) | [8. Coverage scenarios](#8-coverage-scenarios-3-worlds--measured) |
+| [9. Public dataset compatibility](#9-public-dataset-compatibility) | [10. ML pipeline](#10-ml-pipeline) | [11. Missing-data strategy](#11-missing-data-strategy) |
+| [12. Bottleneck detection](#12-bottleneck-detection) | [13. Root-cause tracing](#13-root-cause-tracing) | [14. Recommendations](#14-recommendations) |
+| [15. Stakeholder views](#15-stakeholder-views) | [16. Integration strategy](#16-integration-strategy) | [17. Scalability](#17-scalability) |
+| [18. ROI methodology](#18-roi-methodology) | [19. How to run](#19-how-to-run) | [19b. Scenario-injection layer](#19b-scenario-injection-layer-live-twin-continuation--the-demos-crown) |
+| [20. Extension points](#20-extension-points-documented-intentionally-not-faked-in-v1) | [Assumptions](#assumptions) | [Known limitations](#known-limitations) |
+| [Live Demo](https://akiris-digital-twin.vercel.app/) | [Demo Video](https://youtu.be/nfyGfni0x58) | [GitHub Repository](https://github.com/hrdkkmr/Akiris-digital-twin) |
+
+---
+
 ## 1. Problem
 Assembly lines are patchworks of legacy and modern equipment. Bottlenecks have
 multi-causal, intermittent roots; defects introduced early may only surface at
@@ -68,6 +84,102 @@ FastAPI routers (meta/fleet/analytics/production/ops)  →  React frontend (3 pe
 
 Modular monolith by design (no premature microservices). Every boundary is an
 interface; swap-in points are explicit (see §20).
+
+## Dependencies
+
+AkiRis is built as a modular full-stack application using open-source technologies across simulation, data engineering, machine learning, backend APIs, frontend visualization, deployment, and testing.
+
+### Backend & AI
+
+| Technology | Purpose |
+|---|---|
+| **Python 3.10+** | Core backend, simulation and ML runtime |
+| **FastAPI** | REST API layer |
+| **SQLAlchemy** | Database ORM and persistence |
+| **Pandas / NumPy** | Data processing and feature engineering |
+| **scikit-learn** | Defect-risk and anomaly models |
+| **SimPy** | Discrete-event manufacturing simulation |
+| **Pydantic** | API/data validation |
+| **Joblib** | Model artifact serialization |
+| **python-dotenv** | Environment/configuration management |
+| **Uvicorn** | ASGI application server |
+
+### Frontend
+
+| Technology | Purpose |
+|---|---|
+| **React** | Web application UI |
+| **TypeScript** | Type-safe frontend development |
+| **Vite** | Frontend build and development tooling |
+| **Tailwind CSS** | UI styling |
+| **Axios** | Backend API communication |
+| **Recharts** | Production and analytics visualizations |
+| **React Router** | Frontend routing |
+| **Zustand** | Client-side state management |
+
+### Database & Data
+
+| Technology | Purpose |
+|---|---|
+| **PostgreSQL** | Production-oriented relational twin state |
+| **SQLite** | Zero-config local development |
+| **CSV / JSONL** | Replayable data-source format |
+| **SimPy event stream** | Synthetic production event generation |
+
+### Industrial Integration
+
+| Technology | Status / Purpose |
+|---|---|
+| **MQTT / Sparkplug-style topics** | Streaming integration path |
+| **OPC-UA** | Future PLC/equipment integration adapter |
+| **PLC** | Future production control integration |
+| **MES / Historian** | Future enterprise production-data integration |
+| **DataSource adapter pattern** | Allows new plant/data sources without changing twin core |
+
+> Industrial control integrations are intentionally adapter-based in V1. AkiRis runs in read-only/shadow mode and does not write commands to live PLCs.
+
+### Infrastructure & Observability
+
+| Technology | Purpose |
+|---|---|
+| **Docker** | Containerized deployment |
+| **Docker Compose** | Local multi-service orchestration |
+| **Prometheus** | Metrics collection |
+| **Grafana** | Operational monitoring dashboards |
+
+### Testing & Security
+
+| Technology | Purpose |
+|---|---|
+| **Pytest** | Backend automated tests |
+| **Locust** | API/load testing |
+| **pip-audit** | Python dependency security auditing |
+| **npm audit** | Frontend dependency security auditing |
+| **API-key protection** | Protection for mutating operational endpoints |
+| **CORS controls** | Deployment-level origin restrictions |
+
+### Project Configuration
+
+Python dependencies are maintained in:
+
+    backend/requirements.txt
+
+Frontend dependencies are maintained in:
+
+    frontend/package.json
+
+Environment-specific configuration is provided through:
+
+    .env.example
+    configs/*.yaml
+
+### Live Prototype
+
+**Live Demo:** https://akiris-digital-twin.vercel.app/
+
+**Demo Video:** https://youtu.be/nfyGfni0x58
+
+The live deployment demonstrates the working digital-twin interface, including station observability, bottleneck analysis, vehicle genealogy, defect-risk prediction, recommendations, scenario injection, and model/data-quality signals.
 
 ## 5. Digital Twin model
 Asset tree: **Plant → ProductionLine → Station (+StationType=archetype) → Sensor**,
