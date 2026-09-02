@@ -227,8 +227,8 @@ Generator distributions are empirically inspired (e.g., ~2–4% scrap pressure
 with severe class imbalance, station-coded features à la Bosch `L*_S*`).
 
 ## 10. ML pipeline
-- **Defect risk** (`ml/defect_model.py`): RandomForest over per-vehicle process
-  + sensor-statistic + **upstream-anomaly pressure** (IsolationForest scores
+- **Defect risk** (`ml/defect_model.py`): RandomForest over per-vehicle process 
+  and sensor-statistic + **upstream-anomaly pressure** (IsolationForest scores
   aggregated pre-as-of) + **twin-state context** features (batch failure
   history, final-zone tool-wear trajectory, recent instability/scrap context
   — all time-safe `merge_asof` features). Current main model: v1.6,
@@ -385,7 +385,7 @@ load-tested 60 concurrent users / 1,062 requests / **0 failures**
 (`docs/load_test_report.md`). CI runs backend tests, frontend build and a
 pip-audit/npm-audit **security gate** on every push.
 
-## 19b. Scenario-injection layer (LIVE twin continuation — the demo's crown)
+## 20. Scenario-injection layer (LIVE twin continuation — the demo's crown)
 
 Not a re-run, not a mock: the line **continues** from its last simulated
 timestamp with one disruption knob turned up; ingestion appends to the same
@@ -417,7 +417,7 @@ polling cycle. Defect-model retrain stays a deliberate button (POST
   is V2, not V1). Reset afterwards: `generate_data.py --fresh` (stop the API
   first — SQLite sidecar files must not survive a swap).
 
-## 20. Extension points (documented, intentionally NOT faked in V1)
+## 21. Extension points (documented, intentionally NOT faked in V1)
 1. Soft sensors for uninstrumented stations
 2. Conformal prediction / calibrated uncertainty (prediction ledger)
 3. KPI-paper bottleneck methods + sensitivity-analysis ground truth +
